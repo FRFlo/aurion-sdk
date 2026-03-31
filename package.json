@@ -1,0 +1,44 @@
+{
+	"name": "aurion-sdk",
+	"version": "0.0.1",
+	"description": "",
+	"keywords": [
+		"aurion"
+	],
+	"homepage": "https://github.com/FRFlo/aurion-sdk?tab=readme-ov-file",
+	"bugs": "https://github.com/FRFlo/aurion-sdk/issues",
+	"author": "FRFlo <admin@frflo.ovh>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/FRFlo/aurion-sdk.git"
+	},
+	"files": [
+		"dist"
+	],
+	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		"types": "./dist/index.d.ts",
+		"import": "./dist/index.js",
+		"require": "./dist/index.cjs"
+	},
+	"scripts": {
+		"build": "bun run build.ts",
+		"prepublishOnly": "bun run build",
+		"lint": "oxlint",
+		"lint:fix": "oxlint --fix",
+		"fmt": "oxfmt",
+		"fmt:check": "oxfmt --check"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.11",
+		"bun-plugin-dts": "^0.4.0",
+		"oxfmt": "^0.43.0",
+		"oxlint": "^1.58.0"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	}
+}
