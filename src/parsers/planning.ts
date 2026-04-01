@@ -71,7 +71,6 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 			index,
 			eventId: event.id,
 		});
-
 		return {
 			id: event.id,
 			title: event.title,
@@ -79,7 +78,7 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 			end,
 			allDay: event.allDay,
 			editable: event.editable,
-			location: event.location,
+			location: event.className,
 		};
 	});
 }
@@ -91,7 +90,7 @@ interface PlanningEventPayload {
 	end: unknown;
 	allDay: boolean;
 	editable: boolean;
-	location: string;
+	className: string;
 }
 
 function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
@@ -108,7 +107,7 @@ function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
 		"end" in candidate &&
 		typeof candidate.allDay === "boolean" &&
 		typeof candidate.editable === "boolean" &&
-		typeof candidate.location === "string"
+		typeof candidate.className === "string"
 	);
 }
 
