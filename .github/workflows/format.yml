@@ -3,7 +3,7 @@ name: Format
 on:
   push:
     branches:
-      - main
+      - develop
     paths:
       - ".github/workflows/format.yml"
       - ".github/workflows/lint.yml"
