@@ -26,6 +26,9 @@ export {
 	isPlanningEvent,
 } from "./parsers/planning";
 export {
+	parseAurionPlanningTitle,
+} from "./utils";
+export {
 	parseIdInit,
 	parseMenuId,
 	parseViewState,
@@ -34,3 +37,4 @@ export {
 	throwParsingError,
 } from "./parsers/shared";
 export type { ParsingErrorDetails } from "./parsers/shared";
+export type { ParsedAurionPlanningTitle } from "./utils";

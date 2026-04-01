@@ -79,7 +79,7 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 			end,
 			allDay: event.allDay,
 			editable: event.editable,
-			className: event.className,
+			location: event.location,
 		};
 	});
 }
@@ -91,7 +91,7 @@ interface PlanningEventPayload {
 	end: unknown;
 	allDay: boolean;
 	editable: boolean;
-	className: string;
+	location: string;
 }
 
 function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
@@ -108,7 +108,7 @@ function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
 		"end" in candidate &&
 		typeof candidate.allDay === "boolean" &&
 		typeof candidate.editable === "boolean" &&
-		typeof candidate.className === "string"
+		typeof candidate.location === "string"
 	);
 }
 
@@ -129,6 +129,6 @@ export function isPlanningEvent(value: unknown): value is AurionPlanningEvent {
 		!Number.isNaN(candidate.end.getTime()) &&
 		typeof candidate.allDay === "boolean" &&
 		typeof candidate.editable === "boolean" &&
-		typeof candidate.className === "string"
+		typeof candidate.location === "string"
 	);
 }

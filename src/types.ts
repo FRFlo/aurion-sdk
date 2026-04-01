@@ -117,8 +117,8 @@ export interface AurionPlanningEvent {
 	allDay: boolean;
 	/** Indique si l'événement est modifiable depuis l'interface source. */
 	editable: boolean;
-	/** Classe CSS Aurion associée à l'événement (style, catégorie, statut visuel). */
-	className: string;
+	/** Localisation ou salle associée à l'événement, telle qu'affichée dans Aurion. */
+	location: string;
 }
 
 /**
@@ -135,7 +135,7 @@ export interface RawAurionAbsenceRow {
 	duration: string;
 	/** Créneau horaire concerné tel que fourni par Aurion. */
 	time: string;
-	/** Libellé de la classe/groupe concerné par l'absence. */
+	/** Libellé de la classe/cours concerné par l'absence. */
 	class: string;
 	/** Enseignant associé à l'absence, tel qu'indiqué dans Aurion. */
 	teacher: string;
