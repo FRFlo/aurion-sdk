@@ -9,6 +9,7 @@ export interface ParsingErrorDetails {
 	context?: Record<string, unknown>;
 }
 
+/** Extrait la valeur `javax.faces.ViewState` d'une réponse HTML Aurion. */
 export function parseViewState(body: string): string {
 	const match = body.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
 	if (!match?.[1]) {
@@ -18,6 +19,7 @@ export function parseViewState(body: string): string {
 	return match[1];
 }
 
+/** Extrait la valeur cachée `form:idInit` utilisée dans les POST JSF. */
 export function parseIdInit(body: string): string {
 	const match = body.match(/<input[^>]*name="form:idInit"[^>]*value="([^"]+)"/);
 	if (!match?.[1]) {
@@ -27,6 +29,9 @@ export function parseIdInit(body: string): string {
 	return match[1];
 }
 
+/**
+ * Résout l'identifiant de menu latéral PrimeFaces à partir d'un mot-clé de section.
+ */
 export function parseMenuId(body: string, keyword = MENU_ID_KEYWORD): string {
 	const keywordIndex = body.indexOf(keyword);
 	if (keywordIndex === -1) {
@@ -58,6 +63,7 @@ export function parseMenuId(body: string, keyword = MENU_ID_KEYWORD): string {
 	return lastMatch[1];
 }
 
+/** Nettoie un fragment HTML en texte brut compact et décodé. */
 export function normalizeText(input: string): string {
 	const withoutTags = input.replaceAll(/<[^>]*>/g, " ");
 	const decoded = decodeHtmlEntities(withoutTags);
@@ -65,6 +71,7 @@ export function normalizeText(input: string): string {
 	return decoded.replaceAll(/\s+/g, " ").trim();
 }
 
+/** Décode les entités HTML usuelles rencontrées dans les réponses Aurion. */
 export function decodeHtmlEntities(input: string): string {
 	return input
 		.replaceAll("&nbsp;", " ")
@@ -75,6 +82,9 @@ export function decodeHtmlEntities(input: string): string {
 		.replaceAll("&#39;", "'");
 }
 
+/**
+ * Lance une `AurionError` standardisée pour homogénéiser les erreurs de parsing.
+ */
 export function throwParsingError(
 	body: string,
 	parser: string,

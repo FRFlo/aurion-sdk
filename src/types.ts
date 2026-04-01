@@ -87,35 +87,76 @@ export interface AurionGrade {
 	comment: string | null;
 }
 
+/**
+ * Options de filtrage temporel pour récupérer le planning.
+ *
+ * Les bornes sont exprimées en timestamps Unix en millisecondes.
+ */
 export interface AurionPlanningOptions {
+	/** Début de la fenêtre de recherche (timestamp Unix en millisecondes). */
 	startTimestamp?: number;
+	/** Fin de la fenêtre de recherche (timestamp Unix en millisecondes). */
 	endTimestamp?: number;
 }
 
+/**
+ * Événement de planning normalisé renvoyé par le SDK.
+ *
+ * Ce format reprend la structure utilisée par l'interface calendrier Aurion.
+ */
 export interface AurionPlanningEvent {
+	/** Identifiant unique de l'événement dans le planning. */
 	id: string;
+	/** Intitulé affiché pour le cours, TP ou activité planifiée. */
 	title: string;
+	/** Date/heure de début de l'événement au format fourni par Aurion. */
 	start: string;
+	/** Date/heure de fin de l'événement au format fourni par Aurion. */
 	end: string;
+	/** Indique si l'événement couvre une journée entière sans horaire précis. */
 	allDay: boolean;
+	/** Indique si l'événement est modifiable depuis l'interface source. */
 	editable: boolean;
+	/** Classe CSS Aurion associée à l'événement (style, catégorie, statut visuel). */
 	className: string;
 }
 
+/**
+ * Ligne d'absence brute extraite de la table Aurion.
+ *
+ * Les valeurs sont conservées telles qu'elles apparaissent dans le HTML.
+ */
 export interface RawAurionAbsenceRow {
+	/** Date d'absence telle qu'affichée dans Aurion. */
 	date: string;
+	/** Type d'absence (justifiée, non justifiée, retard, etc.). */
 	type: string;
+	/** Durée textuelle de l'absence (ex. "2h", "journée"). */
 	duration: string;
+	/** Créneau horaire concerné tel que fourni par Aurion. */
 	time: string;
+	/** Libellé de la classe/groupe concerné par l'absence. */
 	class: string;
+	/** Enseignant associé à l'absence, tel qu'indiqué dans Aurion. */
 	teacher: string;
 }
 
+/**
+ * Absence normalisée renvoyée par le SDK.
+ *
+ * Le format reste textuel pour préserver fidèlement les données Aurion.
+ */
 export interface AurionAbsence {
+	/** Date d'absence restituée par Aurion. */
 	date: string;
+	/** Type d'absence interprétable par l'utilisateur final. */
 	type: string;
+	/** Durée déclarée de l'absence. */
 	duration: string;
+	/** Tranche horaire de l'absence. */
 	time: string;
+	/** Classe/groupe concerné par l'absence. */
 	class: string;
+	/** Enseignant rattaché à l'enregistrement d'absence. */
 	teacher: string;
 }

@@ -2,6 +2,7 @@ import type { AurionAbsence, RawAurionAbsenceRow } from "../types";
 
 import { normalizeText, throwParsingError } from "./shared";
 
+/** Convertit une ligne brute d'absence en objet SDK normalisé. */
 export function toAurionAbsence(raw: RawAurionAbsenceRow): AurionAbsence {
 	return {
 		date: raw.date.trim(),
@@ -13,6 +14,7 @@ export function toAurionAbsence(raw: RawAurionAbsenceRow): AurionAbsence {
 	};
 }
 
+/** Parse le tableau HTML des absences en lignes brutes typées. */
 export function parseAbsences(body: string): RawAurionAbsenceRow[] {
 	const absenceRows = body.match(/<tr[^>]*data-ri="[^"]*"[^>]*>([\s\S]*?)<\/tr>/g) ?? [];
 

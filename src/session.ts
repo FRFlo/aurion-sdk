@@ -112,6 +112,16 @@ export class AurionSession {
 		}
 	}
 
+	/**
+	 * Récupère les événements de planning Aurion sur une fenêtre temporelle donnée.
+	 *
+	 * La méthode orchestre l'authentification, la navigation JSF jusqu'à la page
+	 * de planning puis le parsing du payload d'événements renvoyé par Aurion.
+	 *
+	 * @param options Bornes temporelles optionnelles en timestamps Unix (ms).
+	 * @returns La liste des événements de planning normalisés.
+	 * @throws {AurionError} Si une étape réseau, de navigation ou de parsing échoue.
+	 */
 	async getPlanning(options?: AurionPlanningOptions): Promise<AurionPlanningEvent[]> {
 		try {
 			await this.transport.login();
@@ -157,6 +167,15 @@ export class AurionSession {
 		}
 	}
 
+	/**
+	 * Récupère les absences Aurion puis les convertit en structure typée.
+	 *
+	 * Le flux inclut l'ouverture de session, la navigation vers la rubrique
+	 * « Mes absences » puis l'extraction tabulaire des lignes retournées.
+	 *
+	 * @returns La liste des absences normalisées du compte connecté.
+	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
+	 */
 	async getAbsences(): Promise<AurionAbsence[]> {
 		try {
 			await this.transport.login();
@@ -248,6 +267,7 @@ export class AurionSession {
 		state.formIdGrade = parseFormIdGrade(getResponse.body);
 	}
 
+	/** Charge l'écran principal puis extrait l'identifiant de menu « Mon Planning ». */
 	private async loadPlanningSidebarMenuId(state: PlanningNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MainMenuPage.xhtml",
@@ -262,6 +282,7 @@ export class AurionSession {
 		state.menuId = parseSidebarMenuIdForMonPlanning(response.body);
 	}
 
+	/** Ouvre la page Planning et extrait les identifiants JSF requis pour la requête agenda. */
 	private async loadPlanningFormState(state: PlanningNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/Planning.xhtml",
@@ -277,6 +298,9 @@ export class AurionSession {
 		state.formIdPlanning = parseFormIdPlanning(response.body);
 	}
 
+	/**
+	 * Déclenche l'appel PrimeFaces du composant agenda pour récupérer les événements.
+	 */
 	private async postPlanning(
 		state: PlanningNavigationState,
 		startTimestamp: number,
@@ -320,6 +344,7 @@ export class AurionSession {
 		};
 	}
 
+	/** Ouvre le sous-menu principal puis cible l'entrée de navigation « Mes absences ». */
 	private async postAbsencesMainMenu(state: AbsencesNavigationState): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
@@ -345,6 +370,7 @@ export class AurionSession {
 		state.menuId = parseMenuId(response.body, "Mes absences</span>");
 	}
 
+	/** Charge la page MesAbsences et met à jour les champs de contexte JSF actifs. */
 	private async loadAbsencesPageState(state: AbsencesNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MesAbsences.xhtml",
@@ -361,6 +387,7 @@ export class AurionSession {
 		state.idInit = parseIdInit(response.body);
 	}
 
+	/** Exécute la requête de pagination de la table d'absences et parse les lignes HTML. */
 	private async postAbsencesTable(state: AbsencesNavigationState): Promise<RawAurionAbsenceRow[]> {
 		const sourceId = "form:table";
 		const postData = new URLSearchParams({
@@ -453,6 +480,9 @@ export class AurionSession {
 		return parseGrades(response.body);
 	}
 
+	/**
+	 * Initialise les identifiants de navigation communs depuis la racine Aurion.
+	 */
 	private async initializeRootNavigationState(
 		state: { viewState: string; idInit: string; formId?: string },
 		options: { includeFormId: boolean },
@@ -473,6 +503,9 @@ export class AurionSession {
 		}
 	}
 
+	/**
+	 * Soumet une navigation latérale sur MainMenuPage à partir d'un `menuId` déjà résolu.
+	 */
 	private async postSidebarNavigation(
 		state: { viewState: string; idInit: string; menuId: string },
 		step: string,
@@ -506,6 +539,7 @@ interface GradesNavigationState {
 	formIdGrade: string;
 }
 
+/** État intermédiaire utilisé pendant la navigation de la section planning. */
 interface PlanningNavigationState {
 	viewState: string;
 	menuId: string;
@@ -513,6 +547,7 @@ interface PlanningNavigationState {
 	formIdPlanning: string;
 }
 
+/** État intermédiaire utilisé pendant la navigation de la section absences. */
 interface AbsencesNavigationState {
 	viewState: string;
 	formId: string;
@@ -538,6 +573,7 @@ function assertNavigationSuccess(step: string, status: number, url: string): voi
 	);
 }
 
+/** Construit les champs JSF communs attendus par les POST de navigation Aurion. */
 function createMainMenuCommonFields(idInit: string, largeurDivCenter = "885"): Record<string, string> {
 	return {
 		form: "form",
@@ -547,6 +583,7 @@ function createMainMenuCommonFields(idInit: string, largeurDivCenter = "885"): R
 	};
 }
 
+/** Génère le couple focus/input PrimeFaces requis pour simuler le contexte utilisateur. */
 function createFormFocusAndInputFields(focusField: string, inputField: string): Record<string, string> {
 	return {
 		[focusField]: "",
@@ -554,6 +591,9 @@ function createFormFocusAndInputFields(focusField: string, inputField: string): 
 	};
 }
 
+/**
+ * Résout la fenêtre temporelle de planning à partir des options ou des valeurs par défaut SDK.
+ */
 function resolvePlanningWindow(options?: AurionPlanningOptions): {
 	startTimestamp: number;
 	endTimestamp: number;
@@ -567,6 +607,7 @@ function resolvePlanningWindow(options?: AurionPlanningOptions): {
 	};
 }
 
+/** Calcule le numéro de semaine civile utilisé par le formulaire Planning Aurion. */
 function getWeekNumber(date: Date): number {
 	const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
 	const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;

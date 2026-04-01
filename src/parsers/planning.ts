@@ -2,6 +2,7 @@ import type { AurionPlanningEvent } from "../types";
 
 import { throwParsingError } from "./shared";
 
+/** Extrait l'identifiant du widget agenda PrimeFaces de la page Planning. */
 export function parseFormIdPlanning(body: string): string {
 	const match = body.match(/PrimeFaces\.cw\("Schedule","schedule",\{id:"([^"]+)"/);
 	if (!match?.[1]) {
@@ -11,6 +12,7 @@ export function parseFormIdPlanning(body: string): string {
 	return match[1];
 }
 
+/** Extrait l'identifiant de menu latéral correspondant à l'entrée « Mon Planning ». */
 export function parseSidebarMenuIdForMonPlanning(body: string): string {
 	const match = body.match(
 		/onclick="[^"]*?PrimeFaces\.addSubmitParam\('form',\{'form:sidebar':'form:sidebar','form:sidebar_menuid':'([^']+)'\}[^"]*?"[^>]*?>[^<]*<span class="ui-menuitem-icon ui-icon fa fa-calendar-alt"><\/span><span class="ui-menuitem-text">Mon Planning<\/span>/,
@@ -27,6 +29,7 @@ export function parseSidebarMenuIdForMonPlanning(body: string): string {
 	return match[1];
 }
 
+/** Parse la charge JSON d'événements du planning et valide sa structure. */
 export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 	const payloadMatch = body.match(/(\[\{"id"[\s\S]*?}])/);
 	if (!payloadMatch?.[1]) {
@@ -72,6 +75,7 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 	});
 }
 
+/** Vérifie qu'une valeur inconnue respecte la forme d'un événement planning Aurion. */
 export function isPlanningEvent(value: unknown): value is AurionPlanningEvent {
 	if (!value || typeof value !== "object") {
 		return false;
