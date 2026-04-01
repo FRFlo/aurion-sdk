@@ -86,3 +86,36 @@ export interface AurionGrade {
 	/** Commentaire pédagogique associé à la note, ou `null` s'il est vide. */
 	comment: string | null;
 }
+
+export interface AurionPlanningOptions {
+	startTimestamp?: number;
+	endTimestamp?: number;
+}
+
+export interface AurionPlanningEvent {
+	id: string;
+	title: string;
+	start: string;
+	end: string;
+	allDay: boolean;
+	editable: boolean;
+	className: string;
+}
+
+export interface RawAurionAbsenceRow {
+	date: string;
+	type: string;
+	duration: string;
+	time: string;
+	class: string;
+	teacher: string;
+}
+
+export interface AurionAbsence {
+	date: string;
+	type: string;
+	duration: string;
+	time: string;
+	class: string;
+	teacher: string;
+}

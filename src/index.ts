@@ -5,4 +5,32 @@ export { isAurionError } from "./errors";
 /** Client de session haut niveau pour l'accès aux notes Aurion. */
 export { AurionSession } from "./session";
 /** Types de données publics du SDK. */
-export type { AurionGrade, AurionSessionOptions } from "./types";
+export type {
+	AurionAbsence,
+	AurionGrade,
+	AurionPlanningEvent,
+	AurionPlanningOptions,
+	AurionSessionOptions,
+} from "./types";
+export { parseAbsences, toAurionAbsence } from "./parsers/absences";
+export {
+	parseFormId,
+	parseFormIdGrade,
+	parseGrades,
+	toAurionGrade,
+} from "./parsers/grades";
+export {
+	parseFormIdPlanning,
+	parsePlanningEvents,
+	parseSidebarMenuIdForMonPlanning,
+	isPlanningEvent,
+} from "./parsers/planning";
+export {
+	parseIdInit,
+	parseMenuId,
+	parseViewState,
+	normalizeText,
+	decodeHtmlEntities,
+	throwParsingError,
+} from "./parsers/shared";
+export type { ParsingErrorDetails } from "./parsers/shared";

@@ -1,19 +1,9 @@
-import { type AurionError, createAurionError } from "./errors";
+import type { AurionGrade, RawAurionGradeRow } from "../types";
 
-import type { AurionGrade, RawAurionGradeRow } from "./types";
-
-/** Détails contextualisés renvoyés dans les erreurs de parsing HTML. */
-interface ParsingErrorDetails {
-	parser: string;
-	reason: string;
-	except: string;
-	context?: Record<string, unknown>;
-}
+import { normalizeText, throwParsingError } from "./shared";
 
 const FORM_ID_MARKER = ">chargerSousMenu = function()";
-const MENU_ID_KEYWORD = ">Mes notes</span>";
 
-/** Convertit une ligne brute Aurion en objet de note typé et nettoyé. */
 export function toAurionGrade(raw: RawAurionGradeRow): AurionGrade {
 	return {
 		date: raw.date.trim(),
@@ -30,7 +20,6 @@ export function toAurionGrade(raw: RawAurionGradeRow): AurionGrade {
 	};
 }
 
-/** Analyse une valeur numérique potentiellement bruitée du HTML Aurion. */
 function parseNumericField(value: string): number | null {
 	const normalized = value.replaceAll(/\s+/g, "").replace(",", ".");
 	if (!normalized) {
@@ -46,17 +35,6 @@ function parseNumericField(value: string): number | null {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** Extrait la valeur JSF `ViewState` nécessaire aux POST suivants. */
-export function parseViewState(body: string): string {
-	const match = body.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
-	if (!match?.[1]) {
-		throwParsingError(body, "parseViewState", "Missing javax.faces.ViewState input");
-	}
-
-	return match[1];
-}
-
-/** Extrait l'identifiant de source PrimeFaces du formulaire principal. */
 export function parseFormId(body: string): string {
 	const markerIndex = body.indexOf(FORM_ID_MARKER);
 	if (markerIndex === -1) {
@@ -85,53 +63,6 @@ export function parseFormId(body: string): string {
 	return raw;
 }
 
-/** Extrait l'identifiant `form:idInit` depuis le HTML de navigation. */
-export function parseIdInit(body: string): string {
-	// L'ordre des attributs peut varier selon le HTML servi en production.
-	// Exemple: <input id="form:idInit" type="hidden" name="form:idInit" value="webscolaapp.MainMenuPage_..." />
-	const match = body.match(/<input[^>]*name="form:idInit"[^>]*value="([^"]+)"/);
-	if (!match?.[1]) {
-		throwParsingError(body, "parseIdInit", "Missing form:idInit hidden input");
-	}
-
-	return match[1];
-}
-
-/** Extrait l'identifiant du menu latéral associé à la section des notes. */
-export function parseMenuId(body: string, keyword = MENU_ID_KEYWORD): string {
-	const keywordIndex = body.indexOf(keyword);
-	if (keywordIndex === -1) {
-		throwParsingError(body, "parseMenuId", "Keyword not found in sidebar response", {
-			keyword,
-		});
-	}
-
-	const searchStart = Math.max(0, keywordIndex - 400);
-	const snippet = body.slice(searchStart, keywordIndex + keyword.length);
-
-	// Cherche toutes les occurrences du motif menu dans l'extrait ciblé.
-	const matches = Array.from(snippet.matchAll(/form:sidebar_menuid['"]?\s*:\s*['"]([^'"]+)['"]/g));
-
-	if (matches.length === 0) {
-		throwParsingError(body, "parseMenuId", "Unable to extract sidebar menu id", {
-			keyword,
-			snippet,
-		});
-	}
-
-	// Le bon identifiant est celui le plus proche du mot-clé, donc le dernier trouvé.
-	const lastMatch = matches.at(-1);
-	if (!lastMatch?.[1]) {
-		throwParsingError(body, "parseMenuId", "Extracted sidebar menu id is empty", {
-			keyword,
-			snippet,
-		});
-	}
-
-	return lastMatch[1];
-}
-
-/** Extrait l'identifiant du datatable PrimeFaces contenant les notes. */
 export function parseFormIdGrade(body: string): string {
 	const directMatch = body.match(
 		/<div class="EmptyBox10"><\/div><div id="form:([^"]+)" class="ui-datatable ui-widget/,
@@ -159,7 +90,6 @@ export function parseFormIdGrade(body: string): string {
 	return fallbackMatch[1];
 }
 
-/** Parse le fragment HTML renvoyé par PrimeFaces en lignes de notes brutes. */
 export function parseGrades(body: string): RawAurionGradeRow[] {
 	const rows = body.match(/<tr[^>]*>([\s\S]*?)<\/tr>/g);
 	if (!rows) {
@@ -202,7 +132,6 @@ export function parseGrades(body: string): RawAurionGradeRow[] {
 	return parsedRows;
 }
 
-/** Extrait le texte utile d'une cellule HTML de note. */
 function extractSpan(cell?: string): string {
 	if (!cell) {
 		return "";
@@ -212,44 +141,4 @@ function extractSpan(cell?: string): string {
 	const source = spanMatch?.[1] ?? cell;
 
 	return normalizeText(source);
-}
-
-/** Supprime les balises et normalise les espaces d'un texte HTML. */
-function normalizeText(input: string): string {
-	const withoutTags = input.replaceAll(/<[^>]*>/g, " ");
-	const decoded = decodeHtmlEntities(withoutTags);
-
-	return decoded.replaceAll(/\s+/g, " ").trim();
-}
-
-/** Décode les entités HTML les plus fréquentes rencontrées dans Aurion. */
-function decodeHtmlEntities(input: string): string {
-	return input
-		.replaceAll("&nbsp;", " ")
-		.replaceAll("&amp;", "&")
-		.replaceAll("&lt;", "<")
-		.replaceAll("&gt;", ">")
-		.replaceAll("&quot;", '"')
-		.replaceAll("&#39;", "'");
-}
-
-/** Construit puis lève une erreur de parsing homogène et contextualisée. */
-function throwParsingError(
-	body: string,
-	parser: string,
-	reason: string,
-	context?: Record<string, unknown>,
-): never {
-	const details: ParsingErrorDetails = {
-		parser,
-		reason,
-		except: body.slice(0, 280),
-		context,
-	};
-
-	throw createAurionError(
-		"AURION_PARSING_ERROR",
-		`Erreur de parsing Aurion (${parser}): ${reason}`,
-		details,
-	) satisfies AurionError;
 }
