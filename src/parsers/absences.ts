@@ -2,7 +2,13 @@ import type { AurionAbsence, RawAurionAbsenceRow } from "../types";
 
 import { normalizeText, parseDateOrThrow, throwParsingError } from "./shared";
 
-/** Convertit une ligne brute d'absence en objet SDK normalisé. */
+/**
+ * Convertit une ligne brute d'absence en objet SDK normalisé.
+ *
+ * @param raw Ligne brute extraite du tableau Aurion.
+ * @returns L'absence convertie avec dates normalisées.
+ * @throws {AurionError} Si une date ou une heure d'absence ne peut pas être parsée.
+ */
 export function toAurionAbsence(raw: RawAurionAbsenceRow): AurionAbsence {
 	const parser = "toAurionAbsence";
 	const body = JSON.stringify(raw);
@@ -52,7 +58,13 @@ function parseAbsenceTimeOrThrow(raw: RawAurionAbsenceRow, date: Date): Date {
 	return dateTime;
 }
 
-/** Parse le tableau HTML des absences en lignes brutes typées. */
+/**
+ * Parse le tableau HTML des absences en lignes brutes typées.
+ *
+ * @param body Corps HTML renvoyé par la page des absences.
+ * @returns Les lignes d'absences extraites sans normalisation métier.
+ * @throws {AurionError} Si la structure attendue du tableau d'absences est absente ou incohérente.
+ */
 export function parseAbsences(body: string): RawAurionAbsenceRow[] {
 	const absenceRows = body.match(/<tr[^>]*data-ri="[^"]*"[^>]*>([\s\S]*?)<\/tr>/g) ?? [];
 

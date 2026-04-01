@@ -4,7 +4,13 @@ import { normalizeText, parseDateOrThrow, throwParsingError } from "./shared";
 
 const FORM_ID_MARKER = ">chargerSousMenu = function()";
 
-/** Convertit une ligne brute de notes Aurion en objet typé et nettoyé. */
+/**
+ * Convertit une ligne brute de notes Aurion en objet typé et nettoyé.
+ *
+ * @param raw Ligne brute extraite du tableau HTML des notes.
+ * @returns La note Aurion convertie en structure normalisée.
+ * @throws {AurionError} Si la date de la note ne peut pas être parsée.
+ */
 export function toAurionGrade(raw: RawAurionGradeRow): AurionGrade {
 	const parser = "toAurionGrade";
 	const body = JSON.stringify(raw);
@@ -41,7 +47,13 @@ function parseNumericField(value: string): number | null {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** Extrait l'identifiant de formulaire PrimeFaces utilisé pour la navigation notes. */
+/**
+ * Extrait l'identifiant de formulaire PrimeFaces utilisé pour la navigation notes.
+ *
+ * @param body Corps HTML contenant le script PrimeFaces de navigation.
+ * @returns L'identifiant de formulaire utilisé comme source des requêtes JSF.
+ * @throws {AurionError} Si l'identifiant de formulaire ne peut pas être extrait.
+ */
 export function parseFormId(body: string): string {
 	const markerIndex = body.indexOf(FORM_ID_MARKER);
 	if (markerIndex === -1) {
@@ -70,7 +82,13 @@ export function parseFormId(body: string): string {
 	return raw;
 }
 
-/** Extrait l'identifiant de datatable PrimeFaces qui porte les notes. */
+/**
+ * Extrait l'identifiant de datatable PrimeFaces qui porte les notes.
+ *
+ * @param body Corps HTML de la page des notes.
+ * @returns L'identifiant interne de la table PrimeFaces des notes.
+ * @throws {AurionError} Si l'identifiant de datatable ne peut pas être localisé.
+ */
 export function parseFormIdGrade(body: string): string {
 	const directMatch = body.match(
 		/<div class="EmptyBox10"><\/div><div id="form:([^"]+)" class="ui-datatable ui-widget/,
@@ -98,7 +116,13 @@ export function parseFormIdGrade(body: string): string {
 	return fallbackMatch[1];
 }
 
-/** Parse les lignes HTML du tableau de notes en structure brute typée. */
+/**
+ * Parse les lignes HTML du tableau de notes en structure brute typée.
+ *
+ * @param body Corps HTML contenant le tableau de notes Aurion.
+ * @returns Les lignes brutes extraites du tableau des notes.
+ * @throws {AurionError} Si aucune ligne exploitable ne peut être extraite du tableau.
+ */
 export function parseGrades(body: string): RawAurionGradeRow[] {
 	const rows = body.match(/<tr[^>]*>([\s\S]*?)<\/tr>/g);
 	if (!rows) {

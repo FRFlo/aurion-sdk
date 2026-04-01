@@ -33,6 +33,9 @@ export interface AurionError {
  * Vérifie qu'une valeur inconnue respecte la structure {@link AurionError}.
  *
  * Utile pour retraiter proprement une erreur capturée sans supposer son type.
+ *
+ * @param error Valeur arbitraire à tester.
+ * @returns `true` si la valeur respecte la forme d'une {@link AurionError}.
  */
 export function isAurionError(error: unknown): error is AurionError {
 	if (typeof error !== "object" || error === null) {
@@ -48,7 +51,14 @@ export function isAurionError(error: unknown): error is AurionError {
 	);
 }
 
-/** Construit une erreur Aurion homogène avec code, message et détails. */
+/**
+ * Construit une erreur Aurion homogène avec code, message et détails.
+ *
+ * @param code Code d'erreur normalisé à exposer.
+ * @param message Message lisible décrivant la cause métier.
+ * @param details Charge utile optionnelle avec du contexte technique.
+ * @returns Une structure d'erreur compatible avec le SDK.
+ */
 export function createAurionError(
 	code: AurionErrorCode,
 	message: string,

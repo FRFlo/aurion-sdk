@@ -12,6 +12,10 @@ export interface ParsedAurionPlanningTitle {
 /**
  * Découpe un titre Aurion sur 5 lignes dans l'ordre : lieu, infos complémentaires,
  * matière, type de cours et professeur.
+ *
+ * @param title Titre brut Aurion à découper ligne par ligne.
+ * @param normalize Vaut toujours `true` dans l'API actuelle et active la normalisation des blancs.
+ * @returns Les champs sémantiques extraits du titre de planning.
  */
 export function parseAurionPlanningTitle(
 	title: string,
@@ -31,6 +35,10 @@ export function parseAurionPlanningTitle(
 
 /**
  * Normalise un texte en remplaçant les séquences de blancs par un espace simple et en supprimant les espaces en début et fin de chaîne.
+ *
+ * @param text Valeur textuelle optionnelle à normaliser.
+ * @param normalize Indique si la normalisation doit être appliquée.
+ * @returns Le texte compacté, ou la valeur d'origine si la normalisation est désactivée.
  */
 function normalizeText(text: string | undefined, normalize: boolean): string | undefined {
 	if (!normalize || text === undefined) {
@@ -81,7 +89,11 @@ const locationAddressByKeyword: Record<string, Address> = {
 };
 
 /**
- * Renvoie l'adresse du bâtiment à partir d'une sale Aurion, ou `undefined` si elle ne peut être déterminée de manière fiable.
+ * Renvoie l'adresse du bâtiment à partir d'une salle Aurion reconnue.
+ *
+ * @param location Libellé de salle ou de lieu renvoyé par Aurion.
+ * @returns L'adresse normalisée correspondant au bâtiment détecté.
+ * @throws {AurionError} Si aucun mot-clé connu ne permet d'identifier une adresse.
  */
 export function parseLocationToAddress(location: string): Address {
 	for (const keyword in locationAddressByKeyword) {
@@ -126,7 +138,8 @@ export interface GradeDetails {
  *
  * @param code Le code de note brut à parser.
  * @returns Un objet contenant les détails extraits du code de note.
- * @throws Si le format du code est invalide ou si des champs
+ * @throws {Error} Si le format global du code est invalide.
+ * @throws {AurionError} Si des sous-champs requis du code ne peuvent pas être validés.
  */
 export function parseGradeToDetails(code: string): GradeDetails {
 	const regex = /(\d{2})(\d{2})_([A-Z0-9]+)_([A-Z0-9]+)_(.+)/;

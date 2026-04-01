@@ -19,6 +19,10 @@ export class InMemoryCookieJar {
 	/**
 	 * Lit les Set-Cookie d'une réponse et met à jour le stockage interne.
 	 * Retourne le nombre d'en-têtes Set-Cookie rencontrés.
+	 *
+	 * @param headers En-têtes de la réponse HTTP à inspecter.
+	 * @param requestUrl URL de la requête ayant produit la réponse.
+	 * @returns Le nombre de valeurs `Set-Cookie` rencontrées.
 	 */
 	ingestResponseCookies(headers: Headers, requestUrl: URL): number {
 		const setCookies = getSetCookieHeaders(headers);
@@ -41,7 +45,12 @@ export class InMemoryCookieJar {
 		return setCookies.length;
 	}
 
-	/** Construit l'en-tête `Cookie` applicable pour une URL cible. */
+	/**
+	 * Construit l'en-tête `Cookie` applicable pour une URL cible.
+	 *
+	 * @param targetUrl URL vers laquelle une requête va être envoyée.
+	 * @returns La valeur d'en-tête `Cookie`, ou `undefined` si aucun cookie n'est applicable.
+	 */
 	toRequestCookieHeader(targetUrl: URL): string | undefined {
 		const now = Date.now();
 		const entries: StoredCookie[] = [];
@@ -68,13 +77,22 @@ export class InMemoryCookieJar {
 		return entries.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
 	}
 
-	/** Indique si au moins un cookie est actuellement stocké. */
+	/**
+	 * Indique si au moins un cookie est actuellement stocké.
+	 *
+	 * @returns `true` si le jar contient au moins un cookie.
+	 */
 	hasCookies(): boolean {
 		return this.cookies.size > 0;
 	}
 }
 
-/** Extrait les valeurs `Set-Cookie`, y compris sur les implémentations étendues. */
+/**
+ * Extrait les valeurs `Set-Cookie`, y compris sur les implémentations étendues.
+ *
+ * @param headers En-têtes HTTP à inspecter.
+ * @returns Les lignes `Set-Cookie` détectées dans la réponse.
+ */
 export function getSetCookieHeaders(headers: Headers): string[] {
 	const extendedHeaders = headers as Headers & {
 		getSetCookie?: () => string[];
@@ -92,7 +110,12 @@ export function getSetCookieHeaders(headers: Headers): string[] {
 	return splitCombinedSetCookieHeader(combined);
 }
 
-/** Découpe un en-tête Set-Cookie combiné en cookies individuels. */
+/**
+ * Découpe un en-tête Set-Cookie combiné en cookies individuels.
+ *
+ * @param value Valeur brute potentiellement combinée de l'en-tête `Set-Cookie`.
+ * @returns Les cookies individuels extraits de la chaîne.
+ */
 function splitCombinedSetCookieHeader(value: string): string[] {
 	const cookies: string[] = [];
 	let start = 0;
@@ -129,7 +152,13 @@ function splitCombinedSetCookieHeader(value: string): string[] {
 	return cookies;
 }
 
-/** Analyse une ligne Set-Cookie en objet exploitable par le jar. */
+/**
+ * Analyse une ligne Set-Cookie en objet exploitable par le jar.
+ *
+ * @param setCookie Valeur brute d'un en-tête `Set-Cookie`.
+ * @param requestUrl URL d'origine servant à déduire domaine et chemin par défaut.
+ * @returns Le cookie parsé, ou `null` si la ligne est inutilisable.
+ */
 function parseSetCookie(setCookie: string, requestUrl: URL): StoredCookie | null {
 	const segments = setCookie
 		.split(";")
@@ -203,7 +232,12 @@ function parseSetCookie(setCookie: string, requestUrl: URL): StoredCookie | null
 	return parsedCookie;
 }
 
-/** Déduit le path par défaut d'un cookie à partir de l'URL de requête. */
+/**
+ * Déduit le path par défaut d'un cookie à partir de l'URL de requête.
+ *
+ * @param url URL de la requête associée au cookie.
+ * @returns Le chemin par défaut à appliquer au cookie.
+ */
 function defaultPathFromUrl(url: URL): string {
 	if (!url.pathname || !url.pathname.startsWith("/")) {
 		return DEFAULT_COOKIE_PATH;
@@ -217,17 +251,33 @@ function defaultPathFromUrl(url: URL): string {
 	return url.pathname.slice(0, lastSlash);
 }
 
-/** Génère une clé stable pour indexer un cookie dans la map. */
+/**
+ * Génère une clé stable pour indexer un cookie dans la map.
+ *
+ * @param cookie Cookie normalisé à indexer.
+ * @returns La clé de stockage stable du cookie.
+ */
 function cookieKey(cookie: StoredCookie): string {
 	return `${cookie.domain}|${cookie.path}|${cookie.name}`;
 }
 
-/** Vérifie si un cookie est expiré au moment de l'évaluation. */
+/**
+ * Vérifie si un cookie est expiré au moment de l'évaluation.
+ *
+ * @param cookie Cookie à évaluer.
+ * @returns `true` si le cookie est expiré.
+ */
 function isExpired(cookie: StoredCookie): boolean {
 	return cookie.expiresAt !== null && cookie.expiresAt <= Date.now();
 }
 
-/** Vérifie les règles domain/path/secure avant envoi d'un cookie. */
+/**
+ * Vérifie les règles domain/path/secure avant envoi d'un cookie.
+ *
+ * @param cookie Cookie candidat à l'envoi.
+ * @param targetUrl URL de destination de la requête.
+ * @returns `true` si le cookie peut être envoyé vers cette URL.
+ */
 function shouldSendCookie(cookie: StoredCookie, targetUrl: URL): boolean {
 	const host = targetUrl.hostname.toLowerCase();
 	const pathname = targetUrl.pathname || DEFAULT_COOKIE_PATH;
@@ -247,7 +297,13 @@ function shouldSendCookie(cookie: StoredCookie, targetUrl: URL): boolean {
 	return true;
 }
 
-/** Applique la correspondance de domaine pour les cookies hôtes et sous-domaines. */
+/**
+ * Applique la correspondance de domaine pour les cookies hôtes et sous-domaines.
+ *
+ * @param cookieDomain Domaine déclaré par le cookie.
+ * @param requestHost Hôte de la requête cible.
+ * @returns `true` si le domaine du cookie correspond à l'hôte demandé.
+ */
 function domainMatches(cookieDomain: string, requestHost: string): boolean {
 	return requestHost === cookieDomain || requestHost.endsWith(`.${cookieDomain}`);
 }

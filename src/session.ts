@@ -48,6 +48,8 @@ export class AurionSession {
 	 *
 	 * Les appels réseau ne sont pas déclenchés au constructeur ; l'authentification
 	 * réelle a lieu lors du premier appel à {@link getGrades}.
+	 *
+	 * @param options Paramètres de session nécessaires pour cibler Aurion.
 	 */
 	constructor(options: AurionSessionOptions) {
 		this.username = options.username;
@@ -210,14 +212,26 @@ export class AurionSession {
 		}
 	}
 
-	/** Charge la page initiale et extrait les identifiants de session JSF. */
+	/**
+	 * Charge la page initiale et extrait les identifiants de session JSF.
+	 *
+	 * @param state État de navigation des notes à compléter.
+	 * @returns Une promesse résolue une fois les identifiants racine chargés.
+	 * @throws {AurionError} Si la page initiale ou ses identifiants JSF ne peuvent pas être récupérés.
+	 */
 	private async initializeSession(state: GradesNavigationState): Promise<void> {
 		await this.initializeRootNavigationState(state, {
 			includeFormId: true,
 		});
 	}
 
-	/** Ouvre le sous-menu principal qui mène à la zone des notes. */
+	/**
+	 * Ouvre le sous-menu principal qui mène à la zone des notes.
+	 *
+	 * @param state État de navigation des notes contenant les identifiants JSF actifs.
+	 * @returns Une promesse résolue lorsque l'identifiant de menu latéral est disponible.
+	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
+	 */
 	private async postMainMenu(state: GradesNavigationState): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
@@ -243,7 +257,13 @@ export class AurionSession {
 		state.menuId = parseMenuId(response.body);
 	}
 
-	/** Navigue vers ChoixIndividu et prépare l'identifiant de table des notes. */
+	/**
+	 * Navigue vers ChoixIndividu et prépare l'identifiant de table des notes.
+	 *
+	 * @param state État de navigation des notes à enrichir.
+	 * @returns Une promesse résolue une fois la page intermédiaire chargée.
+	 * @throws {AurionError} Si la navigation vers la page des notes échoue.
+	 */
 	private async postMainSidebar(state: GradesNavigationState): Promise<void> {
 		await this.postSidebarNavigation(state, "postMainSidebar:submit");
 
@@ -266,7 +286,13 @@ export class AurionSession {
 		state.formIdGrade = parseFormIdGrade(getResponse.body);
 	}
 
-	/** Charge l'écran principal puis extrait l'identifiant de menu « Mon Planning ». */
+	/**
+	 * Charge l'écran principal puis extrait l'identifiant de menu « Mon Planning ».
+	 *
+	 * @param state État de navigation du planning à mettre à jour.
+	 * @returns Une promesse résolue lorsque le menu planning est identifié.
+	 * @throws {AurionError} Si l'écran principal ou le menu planning ne peuvent pas être lus.
+	 */
 	private async loadPlanningSidebarMenuId(state: PlanningNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MainMenuPage.xhtml",
@@ -281,7 +307,13 @@ export class AurionSession {
 		state.menuId = parseSidebarMenuIdForMonPlanning(response.body);
 	}
 
-	/** Ouvre la page Planning et extrait les identifiants JSF requis pour la requête agenda. */
+	/**
+	 * Ouvre la page Planning et extrait les identifiants JSF requis pour la requête agenda.
+	 *
+	 * @param state État de navigation du planning à compléter.
+	 * @returns Une promesse résolue lorsque l'état JSF du planning est prêt.
+	 * @throws {AurionError} Si la page Planning ou ses identifiants ne peuvent pas être récupérés.
+	 */
 	private async loadPlanningFormState(state: PlanningNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/Planning.xhtml",
@@ -299,6 +331,15 @@ export class AurionSession {
 
 	/**
 	 * Déclenche l'appel PrimeFaces du composant agenda pour récupérer les événements.
+	 *
+	 * @param state État de navigation du planning contenant les identifiants JSF actifs.
+	 * @param startTimestamp Borne de début de la fenêtre de planning en millisecondes Unix.
+	 * @param endTimestamp Borne de fin de la fenêtre de planning en millisecondes Unix.
+	 * @param today Date de référence formatée pour le champ calendrier.
+	 * @param week Numéro de semaine sur deux chiffres.
+	 * @param year Année civile associée à la semaine envoyée.
+	 * @returns Un objet contenant le corps brut renvoyé par Aurion pour la requête d'agenda.
+	 * @throws {AurionError} Si l'appel PrimeFaces du planning échoue.
 	 */
 	private async postPlanning(
 		state: PlanningNavigationState,
@@ -343,7 +384,13 @@ export class AurionSession {
 		};
 	}
 
-	/** Ouvre le sous-menu principal puis cible l'entrée de navigation « Mes absences ». */
+	/**
+	 * Ouvre le sous-menu principal puis cible l'entrée de navigation « Mes absences ».
+	 *
+	 * @param state État de navigation des absences à enrichir.
+	 * @returns Une promesse résolue lorsque l'entrée « Mes absences » est ciblée.
+	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
+	 */
 	private async postAbsencesMainMenu(state: AbsencesNavigationState): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
@@ -369,7 +416,13 @@ export class AurionSession {
 		state.menuId = parseMenuId(response.body, "Mes absences</span>");
 	}
 
-	/** Charge la page MesAbsences et met à jour les champs de contexte JSF actifs. */
+	/**
+	 * Charge la page MesAbsences et met à jour les champs de contexte JSF actifs.
+	 *
+	 * @param state État de navigation des absences à mettre à jour.
+	 * @returns Une promesse résolue lorsque la page des absences est chargée.
+	 * @throws {AurionError} Si la page MesAbsences ou ses identifiants ne peuvent pas être récupérés.
+	 */
 	private async loadAbsencesPageState(state: AbsencesNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MesAbsences.xhtml",
@@ -386,7 +439,13 @@ export class AurionSession {
 		state.idInit = parseIdInit(response.body);
 	}
 
-	/** Exécute la requête de pagination de la table d'absences et parse les lignes HTML. */
+	/**
+	 * Exécute la requête de pagination de la table d'absences et parse les lignes HTML.
+	 *
+	 * @param state État de navigation des absences contenant le contexte JSF actif.
+	 * @returns Les lignes brutes d'absences extraites de la réponse HTML.
+	 * @throws {AurionError} Si la requête ou le parsing de la table échoue.
+	 */
 	private async postAbsencesTable(state: AbsencesNavigationState): Promise<RawAurionAbsenceRow[]> {
 		const sourceId = "form:table";
 		const postData = new URLSearchParams({
@@ -429,7 +488,13 @@ export class AurionSession {
 		return parseAbsences(response.body);
 	}
 
-	/** Déclenche la requête PrimeFaces qui renvoie les lignes de notes. */
+	/**
+	 * Déclenche la requête PrimeFaces qui renvoie les lignes de notes.
+	 *
+	 * @param state État de navigation des notes contenant l'identifiant de table.
+	 * @returns Les lignes brutes de notes renvoyées par Aurion.
+	 * @throws {AurionError} Si la requête ou le parsing des notes échoue.
+	 */
 	private async postGrade(state: GradesNavigationState): Promise<RawAurionGradeRow[]> {
 		const tableId = state.formIdGrade;
 		const sourceId = `form:${tableId}`;
@@ -481,6 +546,11 @@ export class AurionSession {
 
 	/**
 	 * Initialise les identifiants de navigation communs depuis la racine Aurion.
+	 *
+	 * @param state Structure d'état à peupler avec les identifiants racine.
+	 * @param options Indique notamment s'il faut extraire aussi l'identifiant de formulaire.
+	 * @returns Une promesse résolue lorsque l'état racine est initialisé.
+	 * @throws {AurionError} Si la page racine ou ses identifiants JSF sont indisponibles.
 	 */
 	private async initializeRootNavigationState(
 		state: { viewState: string; idInit: string; formId?: string },
@@ -504,6 +574,11 @@ export class AurionSession {
 
 	/**
 	 * Soumet une navigation latérale sur MainMenuPage à partir d'un `menuId` déjà résolu.
+	 *
+	 * @param state État de navigation contenant `viewState`, `idInit` et `menuId`.
+	 * @param step Nom logique de l'étape de navigation pour le reporting d'erreur.
+	 * @returns Une promesse résolue lorsque la soumission latérale a abouti.
+	 * @throws {AurionError} Si la navigation latérale échoue.
 	 */
 	private async postSidebarNavigation(
 		state: { viewState: string; idInit: string; menuId: string },
@@ -554,7 +629,15 @@ interface AbsencesNavigationState {
 	idInit: string;
 }
 
-/** Valide qu'une étape HTTP de navigation Aurion a réussi. */
+/**
+ * Valide qu'une étape HTTP de navigation Aurion a réussi.
+ *
+ * @param step Nom de l'étape métier en cours.
+ * @param status Code HTTP renvoyé par Aurion.
+ * @param url URL finale atteinte pendant cette étape.
+ * @returns Rien ; l'absence d'exception indique que la navigation est valide.
+ * @throws {AurionError} Si le statut HTTP n'appartient pas à la famille 2xx.
+ */
 function assertNavigationSuccess(step: string, status: number, url: string): void {
 	if (status >= 200 && status < 300) {
 		return;
@@ -572,7 +655,13 @@ function assertNavigationSuccess(step: string, status: number, url: string): voi
 	);
 }
 
-/** Construit les champs JSF communs attendus par les POST de navigation Aurion. */
+/**
+ * Construit les champs JSF communs attendus par les POST de navigation Aurion.
+ *
+ * @param idInit Identifiant JSF racine extrait de la page courante.
+ * @param largeurDivCenter Largeur de conteneur à réinjecter dans le formulaire Aurion.
+ * @returns Les champs communs à inclure dans les soumissions JSF Aurion.
+ */
 function createMainMenuCommonFields(
 	idInit: string,
 	largeurDivCenter = "885",
@@ -585,7 +674,13 @@ function createMainMenuCommonFields(
 	};
 }
 
-/** Génère le couple focus/input PrimeFaces requis pour simuler le contexte utilisateur. */
+/**
+ * Génère le couple focus/input PrimeFaces requis pour simuler le contexte utilisateur.
+ *
+ * @param focusField Nom du champ de focus PrimeFaces.
+ * @param inputField Nom du champ d'entrée PrimeFaces associé.
+ * @returns Les champs à injecter dans le formulaire pour reproduire le contexte utilisateur.
+ */
 function createFormFocusAndInputFields(
 	focusField: string,
 	inputField: string,
@@ -598,6 +693,10 @@ function createFormFocusAndInputFields(
 
 /**
  * Résout la fenêtre temporelle de planning à partir des options ou des valeurs par défaut SDK.
+ *
+ * @param options Fenêtre temporelle optionnelle demandée par l'appelant.
+ * @returns Les bornes de début et de fin converties en timestamps Unix.
+ * @throws {AurionError} Si une date fournie dans les options n'est pas valide.
  */
 function resolvePlanningWindow(options?: AurionPlanningOptions): {
 	startTimestamp: number;
@@ -622,7 +721,12 @@ function resolvePlanningWindow(options?: AurionPlanningOptions): {
 	};
 }
 
-/** Calcule le numéro de semaine civile utilisé par le formulaire Planning Aurion. */
+/**
+ * Calcule le numéro de semaine civile utilisé par le formulaire Planning Aurion.
+ *
+ * @param date Date de référence à convertir en numéro de semaine.
+ * @returns Le numéro de semaine civile calculé.
+ */
 function getWeekNumber(date: Date): number {
 	const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
 	const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;

@@ -71,6 +71,11 @@ export class AurionTransport {
 	private loginPromise: Promise<void> | null = null;
 	private authenticated = false;
 
+	/**
+	 * Initialise le transport HTTP Aurion et ses dépendances réseau.
+	 *
+	 * @param options Paramètres de base du transport, dont les identifiants et l'URL cible.
+	 */
 	constructor(options: AurionTransportOptions) {
 		this.fetchFn = options.fetchFn ?? fetch;
 		this.baseUrl = new URL(options.baseUrl);
@@ -79,7 +84,12 @@ export class AurionTransport {
 		this.password = options.password;
 	}
 
-	/** Authentifie la session et garantit une initialisation unique en parallèle. */
+	/**
+	 * Authentifie la session et garantit une initialisation unique en parallèle.
+	 *
+	 * @returns Une promesse résolue lorsque la session distante est prête.
+	 * @throws {AurionError} Si l'authentification ou l'initialisation réseau échoue.
+	 */
 	async login(): Promise<void> {
 		if (this.authenticated) {
 			return;
@@ -97,7 +107,13 @@ export class AurionTransport {
 		}
 	}
 
-	/** Exécute une requête Aurion et normalise la réponse retournée. */
+	/**
+	 * Exécute une requête Aurion et normalise la réponse retournée.
+	 *
+	 * @param options Paramètres HTTP de la requête à exécuter.
+	 * @returns La réponse HTTP normalisée, éventuellement issue du cache.
+	 * @throws {AurionError} Si le transport rencontre une erreur réseau ou de redirection.
+	 */
 	async request(options: TransportRequestOptions): Promise<AurionTransportResponse> {
 		const method = (options.method ?? "GET").toUpperCase() as HttpMethod;
 		const url = this.resolveUrl(options.path);
@@ -163,7 +179,12 @@ export class AurionTransport {
 		return transportResponse;
 	}
 
-	/** Soumet le formulaire de connexion puis valide la création de session. */
+	/**
+	 * Soumet le formulaire de connexion puis valide la création de session.
+	 *
+	 * @returns Une promesse résolue lorsque les cookies de session sont établis.
+	 * @throws {AurionError} Si l'authentification échoue ou si aucun cookie de session n'est reçu.
+	 */
 	private async loginInternal(): Promise<void> {
 		const payload = new URLSearchParams({
 			username: this.username,
@@ -207,7 +228,15 @@ export class AurionTransport {
 		}
 	}
 
-	/** Suit explicitement les redirections pour maîtriser cookies et méthode HTTP. */
+	/**
+	 * Suit explicitement les redirections pour maîtriser cookies et méthode HTTP.
+	 *
+	 * @param initialUrl URL de départ de la requête.
+	 * @param requestInit Méthode, en-têtes et corps à utiliser pour la requête initiale.
+	 * @param followRedirects Indique si les redirections HTTP doivent être suivies manuellement.
+	 * @returns La réponse finale accompagnée du premier statut et de l'URL atteinte.
+	 * @throws {AurionError} Si une erreur réseau survient ou si le nombre maximal de redirections est dépassé.
+	 */
 	private async fetchWithManualRedirects(
 		initialUrl: URL,
 		requestInit: {
@@ -298,13 +327,24 @@ export class AurionTransport {
 		);
 	}
 
-	/** Résout un chemin relatif Aurion sur l'URL de base configurée. */
+	/**
+	 * Résout un chemin relatif Aurion sur l'URL de base configurée.
+	 *
+	 * @param path Chemin relatif ou absolu Aurion à résoudre.
+	 * @returns L'URL absolue correspondante.
+	 */
 	private resolveUrl(path: string): URL {
 		return new URL(path, this.baseUrl);
 	}
 }
 
-/** Copie différentes formes de headers vers un objet Headers mutable. */
+/**
+ * Copie différentes formes de headers vers un objet Headers mutable.
+ *
+ * @param target Objet `Headers` mutable à enrichir.
+ * @param source Valeur source au format `HeadersInit`.
+ * @returns Rien ; la mutation est appliquée sur `target`.
+ */
 function applyHeaders(target: Headers, source: HeadersInit): void {
 	if (source instanceof Headers) {
 		for (const [key, value] of source.entries()) {
@@ -337,7 +377,12 @@ function applyHeaders(target: Headers, source: HeadersInit): void {
 	}
 }
 
-/** Convertit un body optionnel en chaîne prête pour fetch. */
+/**
+ * Convertit un body optionnel en chaîne prête pour fetch.
+ *
+ * @param body Corps brut éventuel de la requête.
+ * @returns Le corps sérialisé en chaîne, ou `undefined` s'il est absent.
+ */
 function stringifyBody(body: URLSearchParams | string | undefined): string | undefined {
 	if (body === undefined) {
 		return undefined;
@@ -350,12 +395,25 @@ function stringifyBody(body: URLSearchParams | string | undefined): string | und
 	return body.toString();
 }
 
-/** Indique si un code HTTP correspond à une redirection. */
+/**
+ * Indique si un code HTTP correspond à une redirection.
+ *
+ * @param status Code HTTP à évaluer.
+ * @returns `true` si le statut correspond à une redirection HTTP.
+ */
 function isRedirectStatus(status: number): boolean {
 	return status >= 300 && status < 400;
 }
 
-/** Réécrit la requête suivante selon les règles HTTP de redirection. */
+/**
+ * Réécrit la requête suivante selon les règles HTTP de redirection.
+ *
+ * @param method Méthode HTTP de la requête précédente.
+ * @param headers En-têtes de la requête précédente.
+ * @param body Corps sérialisé de la requête précédente.
+ * @param status Code HTTP de redirection reçu.
+ * @returns La méthode, les en-têtes et le corps à réutiliser pour la requête suivante.
+ */
 function rewriteRedirectRequest(
 	method: HttpMethod,
 	headers: Headers,

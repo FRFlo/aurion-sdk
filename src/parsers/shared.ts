@@ -9,7 +9,13 @@ export interface ParsingErrorDetails {
 	context?: Record<string, unknown>;
 }
 
-/** Extrait la valeur `javax.faces.ViewState` d'une réponse HTML Aurion. */
+/**
+ * Extrait la valeur `javax.faces.ViewState` d'une réponse HTML Aurion.
+ *
+ * @param body Corps HTML source.
+ * @returns La valeur du champ caché `javax.faces.ViewState`.
+ * @throws {AurionError} Si le champ `ViewState` est introuvable.
+ */
 export function parseViewState(body: string): string {
 	const match = body.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
 	if (!match?.[1]) {
@@ -19,7 +25,13 @@ export function parseViewState(body: string): string {
 	return match[1];
 }
 
-/** Extrait la valeur cachée `form:idInit` utilisée dans les POST JSF. */
+/**
+ * Extrait la valeur cachée `form:idInit` utilisée dans les POST JSF.
+ *
+ * @param body Corps HTML source.
+ * @returns La valeur du champ caché `form:idInit`.
+ * @throws {AurionError} Si le champ `form:idInit` est absent.
+ */
 export function parseIdInit(body: string): string {
 	const match = body.match(/<input[^>]*name="form:idInit"[^>]*value="([^"]+)"/);
 	if (!match?.[1]) {
@@ -31,6 +43,11 @@ export function parseIdInit(body: string): string {
 
 /**
  * Résout l'identifiant de menu latéral PrimeFaces à partir d'un mot-clé de section.
+ *
+ * @param body Corps HTML ou réponse partielle contenant le menu latéral.
+ * @param keyword Mot-clé permettant de cibler l'entrée de menu recherchée.
+ * @returns L'identifiant PrimeFaces du menu latéral correspondant.
+ * @throws {AurionError} Si l'entrée de menu ou son identifiant ne peut pas être extrait.
  */
 export function parseMenuId(body: string, keyword = MENU_ID_KEYWORD): string {
 	const keywordIndex = body.indexOf(keyword);
@@ -63,7 +80,12 @@ export function parseMenuId(body: string, keyword = MENU_ID_KEYWORD): string {
 	return lastMatch[1];
 }
 
-/** Nettoie un fragment HTML en texte brut compact et décodé. */
+/**
+ * Nettoie un fragment HTML en texte brut compact et décodé.
+ *
+ * @param input Fragment HTML à convertir en texte lisible.
+ * @returns Le texte décodé et compacté.
+ */
 export function normalizeText(input: string): string {
 	const withoutTags = input.replaceAll(/<[^>]*>/g, " ");
 	const decoded = decodeHtmlEntities(withoutTags);
@@ -71,7 +93,12 @@ export function normalizeText(input: string): string {
 	return decoded.replaceAll(/\s+/g, " ").trim();
 }
 
-/** Décode les entités HTML usuelles rencontrées dans les réponses Aurion. */
+/**
+ * Décode les entités HTML usuelles rencontrées dans les réponses Aurion.
+ *
+ * @param input Chaîne contenant d'éventuelles entités HTML.
+ * @returns La chaîne avec les entités usuelles remplacées par leurs caractères réels.
+ */
 export function decodeHtmlEntities(input: string): string {
 	return input
 		.replaceAll("&nbsp;", " ")
@@ -84,6 +111,12 @@ export function decodeHtmlEntities(input: string): string {
 
 /**
  * Lance une `AurionError` standardisée pour homogénéiser les erreurs de parsing.
+ *
+ * @param body Corps source utilisé pour enrichir le contexte d'erreur.
+ * @param parser Nom du parseur à l'origine de l'échec.
+ * @param reason Cause lisible de l'erreur de parsing.
+ * @param context Contexte complémentaire optionnel à inclure dans les détails.
+ * @throws {AurionError} Toujours, avec des détails homogènes de parsing.
  */
 export function throwParsingError(
 	body: string,
@@ -107,6 +140,14 @@ export function throwParsingError(
 
 /**
  * Convertit une valeur date-like en objet `Date` valide ou déclenche une erreur de parsing.
+ *
+ * @param body Corps source utilisé pour enrichir l'erreur éventuelle.
+ * @param parser Nom du parseur appelant cette validation.
+ * @param field Nom logique du champ date en cours de conversion.
+ * @param value Valeur à interpréter comme date.
+ * @param context Contexte complémentaire optionnel ajouté aux détails d'erreur.
+ * @returns Une instance `Date` valide représentant la valeur fournie.
+ * @throws {AurionError} Si la valeur ne peut pas être interprétée comme date valide.
  */
 export function parseDateOrThrow(
 	body: string,
