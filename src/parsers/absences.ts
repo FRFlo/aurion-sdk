@@ -1,17 +1,55 @@
 import type { AurionAbsence, RawAurionAbsenceRow } from "../types";
 
-import { normalizeText, throwParsingError } from "./shared";
+import { normalizeText, parseDateOrThrow, throwParsingError } from "./shared";
 
 /** Convertit une ligne brute d'absence en objet SDK normalisé. */
 export function toAurionAbsence(raw: RawAurionAbsenceRow): AurionAbsence {
+	const parser = "toAurionAbsence";
+	const body = JSON.stringify(raw);
+	const date = parseDateOrThrow(body, parser, "date", raw.date, {
+		rawDate: raw.date,
+	});
+
 	return {
-		date: raw.date.trim(),
+		date,
 		type: raw.type.trim(),
 		duration: raw.duration.trim(),
-		time: raw.time.trim(),
+		time: parseAbsenceTimeOrThrow(raw, date),
 		class: raw.class.trim(),
 		teacher: raw.teacher.trim(),
 	};
+}
+
+function parseAbsenceTimeOrThrow(raw: RawAurionAbsenceRow, date: Date): Date {
+	const body = JSON.stringify(raw);
+	const timeRange = raw.time.trim();
+	const startTimeMatch = timeRange.match(/(\d{1,2})[:hH](\d{2})/);
+	if (!startTimeMatch?.[1] || !startTimeMatch[2]) {
+		throwParsingError(body, "toAurionAbsence", 'Unparseable date value for field "time"', {
+			rawTime: raw.time,
+		});
+	}
+
+	const hours = Number.parseInt(startTimeMatch[1], 10);
+	const minutes = Number.parseInt(startTimeMatch[2], 10);
+	if (hours > 23 || minutes > 59) {
+		throwParsingError(body, "toAurionAbsence", 'Unparseable date value for field "time"', {
+			rawTime: raw.time,
+			hours,
+			minutes,
+		});
+	}
+
+	const dateTime = new Date(date.getTime());
+	dateTime.setHours(hours, minutes, 0, 0);
+
+	if (Number.isNaN(dateTime.getTime())) {
+		throwParsingError(body, "toAurionAbsence", 'Unparseable date value for field "time"', {
+			rawTime: raw.time,
+		});
+	}
+
+	return dateTime;
 }
 
 /** Parse le tableau HTML des absences en lignes brutes typées. */

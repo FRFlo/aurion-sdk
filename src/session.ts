@@ -14,7 +14,12 @@ import {
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
 } from "./parsers/planning";
-import { parseIdInit, parseMenuId, parseViewState } from "./parsers/shared";
+import {
+	parseDateOrThrow,
+	parseIdInit,
+	parseMenuId,
+	parseViewState,
+} from "./parsers/shared";
 import { AurionTransport } from "./transport";
 import type {
 	AurionAbsence,
@@ -118,7 +123,7 @@ export class AurionSession {
 	 * La méthode orchestre l'authentification, la navigation JSF jusqu'à la page
 	 * de planning puis le parsing du payload d'événements renvoyé par Aurion.
 	 *
-	 * @param options Bornes temporelles optionnelles en timestamps Unix (ms).
+	 * @param options Bornes temporelles optionnelles en objets natifs `Date`.
 	 * @returns La liste des événements de planning normalisés.
 	 * @throws {AurionError} Si une étape réseau, de navigation ou de parsing échoue.
 	 */
@@ -598,8 +603,18 @@ function resolvePlanningWindow(options?: AurionPlanningOptions): {
 	startTimestamp: number;
 	endTimestamp: number;
 } {
-	const startTimestamp = options?.startTimestamp ?? Date.now() - 7 * 24 * 60 * 60 * 1000;
-	const endTimestamp = options?.endTimestamp ?? startTimestamp + 60 * 24 * 60 * 60 * 1000;
+	const parser = "resolvePlanningWindow";
+	const body = JSON.stringify(options ?? {});
+
+	const startDate = options?.start
+		? parseDateOrThrow(body, parser, "start", options.start)
+		: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+	const endDate = options?.end
+		? parseDateOrThrow(body, parser, "end", options.end)
+		: new Date(startDate.getTime() + 60 * 24 * 60 * 60 * 1000);
+
+	const startTimestamp = startDate.getTime();
+	const endTimestamp = endDate.getTime();
 
 	return {
 		startTimestamp,

@@ -1,13 +1,18 @@
 import type { AurionGrade, RawAurionGradeRow } from "../types";
 
-import { normalizeText, throwParsingError } from "./shared";
+import { normalizeText, parseDateOrThrow, throwParsingError } from "./shared";
 
 const FORM_ID_MARKER = ">chargerSousMenu = function()";
 
 /** Convertit une ligne brute de notes Aurion en objet typé et nettoyé. */
 export function toAurionGrade(raw: RawAurionGradeRow): AurionGrade {
+	const parser = "toAurionGrade";
+	const body = JSON.stringify(raw);
+
 	return {
-		date: raw.date.trim(),
+		date: parseDateOrThrow(body, parser, "date", raw.date, {
+			rawDate: raw.date,
+		}),
 		code: raw.code.trim(),
 		name: raw.name.trim(),
 		grade: parseNumericField(raw.grade),

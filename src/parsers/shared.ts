@@ -104,3 +104,140 @@ export function throwParsingError(
 		details,
 	) satisfies AurionError;
 }
+
+/**
+ * Convertit une valeur date-like en objet `Date` valide ou déclenche une erreur de parsing.
+ */
+export function parseDateOrThrow(
+	body: string,
+	parser: string,
+	field: string,
+	value: unknown,
+	context?: Record<string, unknown>,
+): Date {
+	if (value instanceof Date) {
+		if (Number.isNaN(value.getTime())) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value: "Invalid Date",
+				...context,
+			});
+		}
+
+		return new Date(value.getTime());
+	}
+
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value,
+				...context,
+			});
+		}
+
+		const fromNumber = new Date(value);
+		if (Number.isNaN(fromNumber.getTime())) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value,
+				...context,
+			});
+		}
+
+		return fromNumber;
+	}
+
+	if (typeof value !== "string") {
+		throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+			field,
+			value,
+			...context,
+		});
+	}
+
+	const normalized = value.trim();
+	if (!normalized) {
+		throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+			field,
+			value,
+			...context,
+		});
+	}
+
+	const frenchDateMatch = normalized.match(
+		/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+	);
+
+	if (frenchDateMatch) {
+		const dayRaw = frenchDateMatch[1];
+		const monthRaw = frenchDateMatch[2];
+		const yearRaw = frenchDateMatch[3];
+		if (!dayRaw || !monthRaw || !yearRaw) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value,
+				...context,
+			});
+		}
+
+		const day = Number.parseInt(dayRaw, 10);
+		const month = Number.parseInt(monthRaw, 10);
+		const parsedYear = Number.parseInt(yearRaw, 10);
+		const year = yearRaw.length === 2 ? 2000 + parsedYear : parsedYear;
+		const hours = frenchDateMatch[4] ? Number.parseInt(frenchDateMatch[4], 10) : 0;
+		const minutes = frenchDateMatch[5] ? Number.parseInt(frenchDateMatch[5], 10) : 0;
+		const seconds = frenchDateMatch[6] ? Number.parseInt(frenchDateMatch[6], 10) : 0;
+
+		if (hours > 23 || minutes > 59 || seconds > 59) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value,
+				...context,
+			});
+		}
+
+		const date = new Date(year, month - 1, day, hours, minutes, seconds, 0);
+		if (
+			date.getFullYear() !== year ||
+			date.getMonth() !== month - 1 ||
+			date.getDate() !== day ||
+			date.getHours() !== hours ||
+			date.getMinutes() !== minutes ||
+			date.getSeconds() !== seconds
+		) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value,
+				...context,
+			});
+		}
+
+		return date;
+	}
+
+	const asNumber = Number(normalized);
+	if (Number.isFinite(asNumber) && /^-?\d+(?:\.\d+)?$/.test(normalized)) {
+		const numericDate = new Date(asNumber);
+		if (Number.isNaN(numericDate.getTime())) {
+			throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+				field,
+				value,
+				...context,
+			});
+		}
+
+		return numericDate;
+	}
+
+	const parsed = new Date(normalized);
+	if (Number.isNaN(parsed.getTime())) {
+		throwParsingError(body, parser, `Unparseable date value for field "${field}"`, {
+			field,
+			value,
+			...context,
+		});
+	}
+
+	return parsed;
+}

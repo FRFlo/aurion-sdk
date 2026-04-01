@@ -1,6 +1,6 @@
 import type { AurionPlanningEvent } from "../types";
 
-import { throwParsingError } from "./shared";
+import { parseDateOrThrow, throwParsingError } from "./shared";
 
 /** Extrait l'identifiant du widget agenda PrimeFaces de la page Planning. */
 export function parseFormIdPlanning(body: string): string {
@@ -55,7 +55,7 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 	}
 
 	return parsed.map((event, index) => {
-		if (!isPlanningEvent(event)) {
+		if (!isPlanningEventPayload(event)) {
 			throwParsingError(body, "parsePlanningEvents", "Planning event has invalid shape", {
 				index,
 				event,
@@ -63,16 +63,53 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 			});
 		}
 
+		const start = parseDateOrThrow(payload, "parsePlanningEvents", "start", event.start, {
+			index,
+			eventId: event.id,
+		});
+		const end = parseDateOrThrow(payload, "parsePlanningEvents", "end", event.end, {
+			index,
+			eventId: event.id,
+		});
+
 		return {
 			id: event.id,
 			title: event.title,
-			start: event.start,
-			end: event.end,
+			start,
+			end,
 			allDay: event.allDay,
 			editable: event.editable,
 			className: event.className,
 		};
 	});
+}
+
+interface PlanningEventPayload {
+	id: string;
+	title: string;
+	start: unknown;
+	end: unknown;
+	allDay: boolean;
+	editable: boolean;
+	className: string;
+}
+
+function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+
+	const candidate = value as Record<string, unknown>;
+
+	return (
+		typeof candidate.id === "string" &&
+		typeof candidate.title === "string" &&
+		"start" in candidate &&
+		"end" in candidate &&
+		typeof candidate.allDay === "boolean" &&
+		typeof candidate.editable === "boolean" &&
+		typeof candidate.className === "string"
+	);
 }
 
 /** Vérifie qu'une valeur inconnue respecte la forme d'un événement planning Aurion. */
@@ -86,8 +123,10 @@ export function isPlanningEvent(value: unknown): value is AurionPlanningEvent {
 	return (
 		typeof candidate.id === "string" &&
 		typeof candidate.title === "string" &&
-		typeof candidate.start === "string" &&
-		typeof candidate.end === "string" &&
+		candidate.start instanceof Date &&
+		!Number.isNaN(candidate.start.getTime()) &&
+		candidate.end instanceof Date &&
+		!Number.isNaN(candidate.end.getTime()) &&
 		typeof candidate.allDay === "boolean" &&
 		typeof candidate.editable === "boolean" &&
 		typeof candidate.className === "string"

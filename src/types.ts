@@ -63,8 +63,8 @@ export interface RawAurionGradeRow {
  * sinon à `null` lorsque l'information est absente ou non exploitable.
  */
 export interface AurionGrade {
-	/** Date de l'évaluation telle que restituée par Aurion. */
-	date: string;
+	/** Date de l'évaluation convertie en objet natif JavaScript `Date`. */
+	date: Date;
 	/** Code matière ou identifiant court de l'évaluation. */
 	code: string;
 	/** Intitulé lisible de la note ou de l'épreuve. */
@@ -90,13 +90,13 @@ export interface AurionGrade {
 /**
  * Options de filtrage temporel pour récupérer le planning.
  *
- * Les bornes sont exprimées en timestamps Unix en millisecondes.
+ * Les bornes sont exprimées en objets JavaScript `Date`.
  */
 export interface AurionPlanningOptions {
-	/** Début de la fenêtre de recherche (timestamp Unix en millisecondes). */
-	startTimestamp?: number;
-	/** Fin de la fenêtre de recherche (timestamp Unix en millisecondes). */
-	endTimestamp?: number;
+	/** Début de la fenêtre de recherche. */
+	start?: Date;
+	/** Fin de la fenêtre de recherche. */
+	end?: Date;
 }
 
 /**
@@ -109,10 +109,10 @@ export interface AurionPlanningEvent {
 	id: string;
 	/** Intitulé affiché pour le cours, TP ou activité planifiée. */
 	title: string;
-	/** Date/heure de début de l'événement au format fourni par Aurion. */
-	start: string;
-	/** Date/heure de fin de l'événement au format fourni par Aurion. */
-	end: string;
+	/** Date/heure de début de l'événement convertie en objet natif JavaScript `Date`. */
+	start: Date;
+	/** Date/heure de fin de l'événement convertie en objet natif JavaScript `Date`. */
+	end: Date;
 	/** Indique si l'événement couvre une journée entière sans horaire précis. */
 	allDay: boolean;
 	/** Indique si l'événement est modifiable depuis l'interface source. */
@@ -144,17 +144,17 @@ export interface RawAurionAbsenceRow {
 /**
  * Absence normalisée renvoyée par le SDK.
  *
- * Le format reste textuel pour préserver fidèlement les données Aurion.
+ * Les champs temporels sont convertis en objets natifs JavaScript `Date`.
  */
 export interface AurionAbsence {
-	/** Date d'absence restituée par Aurion. */
-	date: string;
+	/** Date d'absence convertie en objet natif JavaScript `Date`. */
+	date: Date;
 	/** Type d'absence interprétable par l'utilisateur final. */
 	type: string;
 	/** Durée déclarée de l'absence. */
 	duration: string;
-	/** Tranche horaire de l'absence. */
-	time: string;
+	/** Horodatage de début de tranche converti en objet natif JavaScript `Date`. */
+	time: Date;
 	/** Classe/groupe concerné par l'absence. */
 	class: string;
 	/** Enseignant rattaché à l'enregistrement d'absence. */
