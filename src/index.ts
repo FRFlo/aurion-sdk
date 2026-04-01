@@ -20,7 +20,13 @@ export {
 	parseSidebarMenuIdForMonPlanning,
 	isPlanningEvent,
 } from "./parsers/planning";
-export { parseAurionPlanningTitle, parseLocationToAddress, type Address } from "./utils";
+export {
+	parseAurionPlanningTitle,
+	parseLocationToAddress,
+	type Address,
+	type GradeDetails,
+	parseGradeToDetails,
+} from "./utils";
 export {
 	parseIdInit,
 	parseMenuId,
