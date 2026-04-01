@@ -74,16 +74,19 @@ export function parseAbsences(body: string): RawAurionAbsenceRow[] {
 	const parsedRows: RawAurionAbsenceRow[] = [];
 
 	for (const row of absenceRows) {
-		const cells = Array.from(row.matchAll(/<td[^>]*role="gridcell"[^>]*>([\s\S]*?)<\/td>/g), (match) => {
-			const cellContent = match[1];
-			if (typeof cellContent !== "string") {
-				throwParsingError(body, "parseAbsences", "Absence row cell extraction failed", {
-					rowSnippet: row.slice(0, 220),
-				});
-			}
+		const cells = Array.from(
+			row.matchAll(/<td[^>]*role="gridcell"[^>]*>([\s\S]*?)<\/td>/g),
+			(match) => {
+				const cellContent = match[1];
+				if (typeof cellContent !== "string") {
+					throwParsingError(body, "parseAbsences", "Absence row cell extraction failed", {
+						rowSnippet: row.slice(0, 220),
+					});
+				}
 
-			return normalizeText(cellContent);
-		});
+				return normalizeText(cellContent);
+			},
+		);
 
 		if (cells.length === 0) {
 			continue;

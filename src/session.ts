@@ -1,25 +1,12 @@
 import { createAurionError, isAurionError } from "./errors";
-import {
-	parseAbsences,
-	toAurionAbsence,
-} from "./parsers/absences";
-import {
-	parseFormId,
-	parseFormIdGrade,
-	parseGrades,
-	toAurionGrade,
-} from "./parsers/grades";
+import { parseAbsences, toAurionAbsence } from "./parsers/absences";
+import { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
 import {
 	parseFormIdPlanning,
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
 } from "./parsers/planning";
-import {
-	parseDateOrThrow,
-	parseIdInit,
-	parseMenuId,
-	parseViewState,
-} from "./parsers/shared";
+import { parseDateOrThrow, parseIdInit, parseMenuId, parseViewState } from "./parsers/shared";
 import { AurionTransport } from "./transport";
 import type {
 	AurionAbsence,
@@ -156,7 +143,14 @@ export class AurionSession {
 			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
 			const year = String(planningDate.getFullYear());
 
-			const response = await this.postPlanning(state, startTimestamp, endTimestamp, today, week, year);
+			const response = await this.postPlanning(
+				state,
+				startTimestamp,
+				endTimestamp,
+				today,
+				week,
+				year,
+			);
 
 			return parsePlanningEvents(response.body);
 		} catch (error: unknown) {
@@ -579,7 +573,10 @@ function assertNavigationSuccess(step: string, status: number, url: string): voi
 }
 
 /** Construit les champs JSF communs attendus par les POST de navigation Aurion. */
-function createMainMenuCommonFields(idInit: string, largeurDivCenter = "885"): Record<string, string> {
+function createMainMenuCommonFields(
+	idInit: string,
+	largeurDivCenter = "885",
+): Record<string, string> {
 	return {
 		form: "form",
 		"form:largeurDivCenter": largeurDivCenter,
@@ -589,7 +586,10 @@ function createMainMenuCommonFields(idInit: string, largeurDivCenter = "885"): R
 }
 
 /** Génère le couple focus/input PrimeFaces requis pour simuler le contexte utilisateur. */
-function createFormFocusAndInputFields(focusField: string, inputField: string): Record<string, string> {
+function createFormFocusAndInputFields(
+	focusField: string,
+	inputField: string,
+): Record<string, string> {
 	return {
 		[focusField]: "",
 		[inputField]: AURION_USER_CONTEXT_ID,

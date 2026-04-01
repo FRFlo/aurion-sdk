@@ -13,21 +13,14 @@ export type {
 	AurionSessionOptions,
 } from "./types";
 export { parseAbsences, toAurionAbsence } from "./parsers/absences";
-export {
-	parseFormId,
-	parseFormIdGrade,
-	parseGrades,
-	toAurionGrade,
-} from "./parsers/grades";
+export { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
 export {
 	parseFormIdPlanning,
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
 	isPlanningEvent,
 } from "./parsers/planning";
-export {
-	parseAurionPlanningTitle,
-} from "./utils";
+export { parseAurionPlanningTitle, parseLocationToAddress, type Address } from "./utils";
 export {
 	parseIdInit,
 	parseMenuId,
