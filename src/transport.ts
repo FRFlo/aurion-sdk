@@ -119,7 +119,9 @@ export class AurionTransport {
 		const requestBody = stringifyBody(options.body);
 		const followRedirects = options.followRedirects ?? true;
 		const shouldUseCache =
-			(options.cache ?? true) && this.cacheStore !== null && (method === "GET" || method === "POST");
+			(options.cache ?? true) &&
+			this.cacheStore !== null &&
+			(method === "GET" || method === "POST");
 		const cacheKey = shouldUseCache
 			? createAurionCacheKey("transport", method, url.toString(), requestBody)
 			: null;

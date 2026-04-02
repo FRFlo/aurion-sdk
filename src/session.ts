@@ -33,13 +33,13 @@ const FORM_URLENCODED_HEADERS = {
 } as const;
 
 /**
-	 * Session Aurion de haut niveau, responsable de l'authentification,
-	 * de la navigation dans l'interface et de la récupération des données SDK.
-	 *
-	 * C'est le point d'entrée principal du SDK pour ouvrir une session puis
-	 * récupérer les notes, le planning et les absences de l'utilisateur
-	 * authentifié, avec un cache optionnel partagé avec la couche HTTP.
-	 */
+ * Session Aurion de haut niveau, responsable de l'authentification,
+ * de la navigation dans l'interface et de la récupération des données SDK.
+ *
+ * C'est le point d'entrée principal du SDK pour ouvrir une session puis
+ * récupérer les notes, le planning et les absences de l'utilisateur
+ * authentifié, avec un cache optionnel partagé avec la couche HTTP.
+ */
 export class AurionSession {
 	/** Identifiant Aurion utilisé pour ouvrir la session distante. */
 	readonly username: string;
@@ -97,10 +97,7 @@ export class AurionSession {
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
 	 */
 	async getGrades(): Promise<AurionGrade[]> {
-		const cacheKey = createAurionValueCacheKey(
-			"session",
-			`${this.getSessionCacheScope()}:grades`,
-		);
+		const cacheKey = createAurionValueCacheKey("session", `${this.getSessionCacheScope()}:grades`);
 
 		try {
 			const cached = await this.readCachedValue<AurionGrade[]>(cacheKey);

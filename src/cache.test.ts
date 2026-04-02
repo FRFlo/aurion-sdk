@@ -10,7 +10,10 @@ import { AurionSession } from "./session";
 import { AurionTransport } from "./transport";
 
 function createMockFetch(
-	handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>,
+	handler: (
+		input: Parameters<typeof fetch>[0],
+		init?: Parameters<typeof fetch>[1],
+	) => Promise<Response>,
 ): typeof fetch {
 	return Object.assign(handler, {
 		preconnect: fetch.preconnect.bind(fetch),
@@ -52,11 +55,14 @@ async function seedSessionValue<TValue>(
 	const scope = `${parts.baseUrl ?? "https://aurion.junia.com"}:${parts.username ?? "demo"}`;
 	const keySuffix = parts.suffix ? `:${parts.suffix}` : "";
 
-	await cacheStore.set(createAurionValueCacheKey("session", `${scope}:${parts.resource}${keySuffix}`), {
-		kind: "value",
-		createdAt,
-		value,
-	});
+	await cacheStore.set(
+		createAurionValueCacheKey("session", `${scope}:${parts.resource}${keySuffix}`),
+		{
+			kind: "value",
+			createdAt,
+			value,
+		},
+	);
 }
 
 describe("cache configuration", () => {
@@ -81,9 +87,9 @@ describe("cache configuration", () => {
 		expect(cacheConfig.transportMaxAgeMs).toBe(5_000);
 	});
 
-		test("AurionSession uses preloaded cached grades before hitting the network", async () => {
-			const cacheStore = new InMemoryAurionCache();
-			const cachedGrades = [
+	test("AurionSession uses preloaded cached grades before hitting the network", async () => {
+		const cacheStore = new InMemoryAurionCache();
+		const cachedGrades = [
 			{
 				date: new Date("2025-01-15T00:00:00.000Z"),
 				code: "MATH101",
@@ -181,7 +187,9 @@ describe("cache configuration", () => {
 			baseUrl: "https://campus-b.test",
 			fetchFn: createMockFetch(async () => {
 				fetchCount += 1;
-				throw new Error("network should be attempted because the baseUrl-specific cache key differs");
+				throw new Error(
+					"network should be attempted because the baseUrl-specific cache key differs",
+				);
 			}),
 		});
 
@@ -216,32 +224,35 @@ describe("cache configuration", () => {
 
 		await seedSessionValue(cacheStore, { resource: "grades" }, expiredGrades, Date.now() - 10_000);
 
-		const session = createSession({
-			store: cacheStore,
-			sessionMaxAgeMs: 1,
-		}, {
-			fetchFn: createMockFetch(async () => {
-				throw new Error("expired session cache should fall through to the network");
-			}),
-		});
+		const session = createSession(
+			{
+				store: cacheStore,
+				sessionMaxAgeMs: 1,
+			},
+			{
+				fetchFn: createMockFetch(async () => {
+					throw new Error("expired session cache should fall through to the network");
+				}),
+			},
+		);
 
 		await expect(session.getGrades()).rejects.toThrow("La requête réseau Aurion a échoué.");
 	});
 });
 
 describe("transport cache", () => {
-		test("AurionTransport reads and writes through the injected cache store", async () => {
-			const cacheStore = new InMemoryAurionCache();
-			let fetchCount = 0;
-			const fetchFn = createMockFetch(async () => {
-				fetchCount += 1;
-				return new Response("payload", {
-					status: 200,
-					headers: {
-						"Content-Type": "text/plain",
-					},
-				});
+	test("AurionTransport reads and writes through the injected cache store", async () => {
+		const cacheStore = new InMemoryAurionCache();
+		let fetchCount = 0;
+		const fetchFn = createMockFetch(async () => {
+			fetchCount += 1;
+			return new Response("payload", {
+				status: 200,
+				headers: {
+					"Content-Type": "text/plain",
+				},
 			});
+		});
 
 		const transport = new AurionTransport({
 			username: "demo",
