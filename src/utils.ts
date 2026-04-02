@@ -19,7 +19,7 @@ export interface ParsedAurionPlanningTitle {
  */
 export function parseAurionPlanningTitle(
 	title: string,
-	normalize: true,
+	normalize: boolean = true,
 ): ParsedAurionPlanningTitle {
 	const rawParts = title.split("\n").map((part) => part.trim());
 	const [location, additionalInfo, subject, courseType, professor] = rawParts;
