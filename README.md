@@ -186,18 +186,18 @@ try {
 
 ### Exports principaux
 
-| Export | Type | Rôle |
-|---|---|---|
-| `AurionSession` | classe | Client SDK de haut niveau pour les notes, le planning et les absences |
-| `isAurionError` | fonction | Garde de type pour les erreurs structurées du SDK |
-| `InMemoryAurionCache` | classe | Stockage de cache mémoire intégré |
-| `resolveAurionCacheConfig` | fonction | Normalise la configuration publique du cache |
-| `resolveAurionCacheStore` | fonction | Résout un stockage de cache concret à partir des options publiques |
-| `createAurionCacheKey` | fonction | Construit les clés de cache du transport |
-| `createAurionValueCacheKey` | fonction | Construit les clés de cache des valeurs de session |
-| `isAurionCacheEntryExpired` | fonction | Vérifie l’expiration TTL des entrées de cache |
-| `parseGrades`, `parsePlanningEvents`, `parseAbsences` | fonctions | Parseurs bas niveau pour les charges utiles Aurion brutes |
-| `toAurionGrade`, `toAurionAbsence` | fonctions | Convertissent des lignes brutes parsées en objets SDK normalisés |
+| Export                                                                      | Type      | Rôle                                                                      |
+| --------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------- |
+| `AurionSession`                                                             | classe    | Client SDK de haut niveau pour les notes, le planning et les absences     |
+| `isAurionError`                                                             | fonction  | Garde de type pour les erreurs structurées du SDK                         |
+| `InMemoryAurionCache`                                                       | classe    | Stockage de cache mémoire intégré                                         |
+| `resolveAurionCacheConfig`                                                  | fonction  | Normalise la configuration publique du cache                              |
+| `resolveAurionCacheStore`                                                   | fonction  | Résout un stockage de cache concret à partir des options publiques        |
+| `createAurionCacheKey`                                                      | fonction  | Construit les clés de cache du transport                                  |
+| `createAurionValueCacheKey`                                                 | fonction  | Construit les clés de cache des valeurs de session                        |
+| `isAurionCacheEntryExpired`                                                 | fonction  | Vérifie l’expiration TTL des entrées de cache                             |
+| `parseGrades`, `parsePlanningEvents`, `parseAbsences`                       | fonctions | Parseurs bas niveau pour les charges utiles Aurion brutes                 |
+| `toAurionGrade`, `toAurionAbsence`                                          | fonctions | Convertissent des lignes brutes parsées en objets SDK normalisés          |
 | `parseAurionPlanningTitle`, `parseLocationToAddress`, `parseGradeToDetails` | fonctions | Utilitaires de plus haut niveau pour le post-traitement côté consommateur |
 
 ### `AurionSession`
@@ -208,21 +208,21 @@ new AurionSession(options: AurionSessionOptions)
 
 Champs de `AurionSessionOptions` :
 
-| Champ | Type | Description |
-|---|---|---|
-| `username` | `string` | Identifiant de connexion Aurion |
-| `password` | `string` | Mot de passe Aurion |
-| `fetchFn` | `typeof fetch` | Implémentation personnalisée optionnelle de `fetch` |
-| `cache` | `boolean \| AurionCacheStore \| AurionCacheOptions` | Configuration du cache |
-| `baseUrl` | `string` | URL optionnelle de l’instance Aurion, par défaut `https://aurion.junia.com` |
+| Champ      | Type                                                | Description                                                                 |
+| ---------- | --------------------------------------------------- | --------------------------------------------------------------------------- |
+| `username` | `string`                                            | Identifiant de connexion Aurion                                             |
+| `password` | `string`                                            | Mot de passe Aurion                                                         |
+| `fetchFn`  | `typeof fetch`                                      | Implémentation personnalisée optionnelle de `fetch`                         |
+| `cache`    | `boolean \| AurionCacheStore \| AurionCacheOptions` | Configuration du cache                                                      |
+| `baseUrl`  | `string`                                            | URL optionnelle de l’instance Aurion, par défaut `https://aurion.junia.com` |
 
 Méthodes principales :
 
-| Méthode | Retour | Notes |
-|---|---|---|
-| `getGrades()` | `Promise<AurionGrade[]>` | Authentifie à la demande, navigue vers les notes et parse le tableau HTML |
-| `getPlanning(options?)` | `Promise<AurionPlanningEvent[]>` | Charge les événements de planning sur une fenêtre fournie ou par défaut |
-| `getAbsences()` | `Promise<AurionAbsence[]>` | Navigue vers les absences et renvoie des enregistrements normalisés |
+| Méthode                 | Retour                           | Notes                                                                     |
+| ----------------------- | -------------------------------- | ------------------------------------------------------------------------- |
+| `getGrades()`           | `Promise<AurionGrade[]>`         | Authentifie à la demande, navigue vers les notes et parse le tableau HTML |
+| `getPlanning(options?)` | `Promise<AurionPlanningEvent[]>` | Charge les événements de planning sur une fenêtre fournie ou par défaut   |
+| `getAbsences()`         | `Promise<AurionAbsence[]>`       | Navigue vers les absences et renvoie des enregistrements normalisés       |
 
 ### Formes de données
 
