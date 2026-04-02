@@ -696,7 +696,7 @@ export class AurionSession {
 	}
 
 	private getSessionCacheScope(): string {
-		return `${this.baseUrl}:${this.username}`;
+		return `${this.baseUrl}:${Bun.hash(this.username)}`;
 	}
 }
 
