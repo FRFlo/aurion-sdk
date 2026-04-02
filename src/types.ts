@@ -117,8 +117,8 @@ export interface AurionPlanningEvent {
 	allDay: boolean;
 	/** Indique si l'événement est modifiable depuis l'interface source. */
 	editable: boolean;
-	/** Localisation ou salle associée à l'événement, telle qu'affichée dans Aurion. */
-	location: string;
+	/** Type de l'événement (ex. "Cours", "TP", "Examen") tel que fourni par Aurion. */
+	type: string;
 }
 
 /**

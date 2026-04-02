@@ -96,7 +96,7 @@ export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
 			end,
 			allDay: event.allDay,
 			editable: event.editable,
-			location: event.className,
+			type: event.className,
 		};
 	});
 }
@@ -151,6 +151,6 @@ export function isPlanningEvent(value: unknown): value is AurionPlanningEvent {
 		!Number.isNaN(candidate.end.getTime()) &&
 		typeof candidate.allDay === "boolean" &&
 		typeof candidate.editable === "boolean" &&
-		typeof candidate.location === "string"
+		typeof candidate.type === "string"
 	);
 }
