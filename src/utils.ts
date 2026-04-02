@@ -151,8 +151,11 @@ export function parseGradeToDetails(code: string): GradeDetails {
 
 	const [, startingYearStr, endingYearStr, school, className, additionalInfo] = match;
 
-	const startingYear = parseInt(startingYearStr ?? "", 10);
-	const endingYear = parseInt(endingYearStr ?? "", 10);
+	// extract current year to keep the two first digits of the starting and ending year in the correct century
+	const currentCentury = Math.floor(new Date().getFullYear() / 100) * 100;
+
+	const startingYear = currentCentury + parseInt(startingYearStr ?? "", 10);
+	const endingYear = currentCentury + parseInt(endingYearStr ?? "", 10);
 
 	if (isNaN(startingYear) || isNaN(endingYear)) {
 		throw createAurionError(
