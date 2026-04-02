@@ -4,9 +4,24 @@ export type { AurionError, AurionErrorCode } from "./errors";
 export { isAurionError } from "./errors";
 /** Client de session haut niveau pour l'accès aux notes Aurion. */
 export { AurionSession } from "./session";
+/** Outils de cache publics du SDK. */
+export {
+	isAurionCacheEntryExpired,
+	isAurionCacheStore,
+	createAurionCacheKey,
+	createAurionValueCacheKey,
+	InMemoryAurionCache,
+	isAurionTransportCacheEntry,
+	isAurionValueCacheEntry,
+	resolveAurionCacheConfig,
+	resolveAurionCacheStore,
+} from "./cache";
 /** Types de données publics du SDK. */
 export type {
 	AurionAbsence,
+	AurionCacheEntry,
+	AurionCacheOptions,
+	AurionCacheStore,
 	AurionGrade,
 	AurionPlanningEvent,
 	AurionPlanningOptions,

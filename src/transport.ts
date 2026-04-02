@@ -1,6 +1,12 @@
 import type { HeadersInit } from "bun";
+import {
+	createAurionCacheKey,
+	isAurionCacheEntryExpired,
+	isAurionTransportCacheEntry,
+} from "./cache";
 import { InMemoryCookieJar } from "./cookie-jar";
 import { createAurionError, isAurionError } from "./errors";
+import type { AurionCacheStore, AurionTransportCacheEntry } from "./cache";
 
 type HttpMethod = "GET" | "POST";
 
@@ -9,7 +15,8 @@ interface AurionTransportOptions {
 	username: string;
 	password: string;
 	baseUrl: string;
-	cache: boolean;
+	cacheStore: AurionCacheStore | null;
+	cacheMaxAgeMs?: number;
 	fetchFn?: typeof fetch;
 }
 
@@ -28,15 +35,6 @@ interface RedirectedFetchResult {
 	response: Response;
 	initialStatus: number;
 	finalUrl: URL;
-}
-
-/** Représentation sérialisable d'une réponse mise en cache. */
-interface CachedTransportResponse {
-	status: number;
-	initialStatus: number;
-	url: string;
-	body: string;
-	headers: [string, string][];
 }
 
 /** Réponse HTTP normalisée renvoyée au reste du SDK. */
@@ -64,8 +62,8 @@ export class AurionTransport {
 	private readonly fetchFn: typeof fetch;
 	private readonly baseUrl: URL;
 	private readonly cookieJar = new InMemoryCookieJar();
-	private readonly responseCache = new Map<string, CachedTransportResponse>();
-	private readonly cacheEnabled: boolean;
+	private readonly cacheStore: AurionCacheStore | null;
+	private readonly cacheMaxAgeMs?: number;
 	private readonly username: string;
 	private readonly password: string;
 	private loginPromise: Promise<void> | null = null;
@@ -79,7 +77,8 @@ export class AurionTransport {
 	constructor(options: AurionTransportOptions) {
 		this.fetchFn = options.fetchFn ?? fetch;
 		this.baseUrl = new URL(options.baseUrl);
-		this.cacheEnabled = options.cache;
+		this.cacheStore = options.cacheStore;
+		this.cacheMaxAgeMs = options.cacheMaxAgeMs;
 		this.username = options.username;
 		this.password = options.password;
 	}
@@ -120,20 +119,26 @@ export class AurionTransport {
 		const requestBody = stringifyBody(options.body);
 		const followRedirects = options.followRedirects ?? true;
 		const shouldUseCache =
-			(options.cache ?? true) && this.cacheEnabled && (method === "GET" || method === "POST");
-		const cacheKey = shouldUseCache ? `${method}:${url.toString()}:${requestBody ?? ""}` : null;
+			(options.cache ?? true) && this.cacheStore !== null && (method === "GET" || method === "POST");
+		const cacheKey = shouldUseCache
+			? createAurionCacheKey("transport", method, url.toString(), requestBody)
+			: null;
 
-		if (cacheKey && this.responseCache.has(cacheKey)) {
-			const cached = this.responseCache.get(cacheKey);
-			if (cached) {
-				return {
-					status: cached.status,
-					initialStatus: cached.initialStatus,
-					url: cached.url,
-					body: cached.body,
-					headers: new Headers(cached.headers),
-					fromCache: true,
-				};
+		if (cacheKey && this.cacheStore) {
+			const cached = await this.cacheStore.get(cacheKey);
+			if (isAurionTransportCacheEntry(cached)) {
+				if (isAurionCacheEntryExpired(cached, this.cacheMaxAgeMs)) {
+					await this.cacheStore.delete(cacheKey);
+				} else {
+					return {
+						status: cached.status,
+						initialStatus: cached.initialStatus,
+						url: cached.url,
+						body: cached.body,
+						headers: new Headers(cached.headers),
+						fromCache: true,
+					};
+				}
 			}
 		}
 
@@ -167,13 +172,17 @@ export class AurionTransport {
 		};
 
 		if (cacheKey) {
-			this.responseCache.set(cacheKey, {
+			const cacheEntry: AurionTransportCacheEntry = {
+				kind: "transport",
+				createdAt: Date.now(),
 				status: transportResponse.status,
 				initialStatus: transportResponse.initialStatus,
 				url: transportResponse.url,
 				body: transportResponse.body,
 				headers: Array.from(transportResponse.headers.entries()),
-			});
+			};
+
+			await this.cacheStore?.set(cacheKey, cacheEntry);
 		}
 
 		return transportResponse;

@@ -1,3 +1,9 @@
+import type { AurionCacheOptions, AurionCacheStore } from "./cache";
+
+export type { AurionCacheEntry, AurionCacheStore, AurionTransportCacheEntry } from "./cache";
+export type { AurionValueCacheEntry } from "./cache";
+export type { AurionCacheOptions } from "./cache";
+
 /**
  * Options de configuration pour créer une session Aurion.
  *
@@ -22,12 +28,24 @@ export interface AurionSessionOptions {
 	 */
 	fetchFn?: typeof fetch;
 	/**
-	 * Active le cache des requêtes pendant la session.
-	 * Les réponses identiques peuvent alors être réutilisées au lieu de relancer
-	 * une requête réseau vers Aurion.
+	 * Configure le cache utilisé par la session et par la couche HTTP.
+	 *
+	 * - `true` active le cache mémoire fourni par le SDK.
+	 * - `false` désactive totalement le cache.
+	 * - Une implémentation {@link AurionCacheStore} permet d'injecter un backend
+	 *   personnalisé avec `get`, `set`, `delete` et `clear`.
+	 * - Un objet {@link AurionCacheOptions} permet de configurer le store et les
+	 *   TTL d'invalidation des entrées de session et de transport.
+	 *
+	 * Les données de notes, planning et absences, ainsi que les réponses HTTP
+	 * nécessaires à la navigation Aurion, peuvent alors être réutilisées au lieu
+	 * d'être recalculées ou rechargées. Quand un TTL est défini, une entrée
+	 * expirée est supprimée lors de sa lecture puis recalculée. `maxAgeMs`
+	 * applique un TTL commun par défaut, et `sessionMaxAgeMs` /
+	 * `transportMaxAgeMs` permettent de surcharger chaque couche.
 	 * @default false
 	 */
-	cache?: boolean;
+	cache?: boolean | AurionCacheStore | AurionCacheOptions;
 	/**
 	 * URL de base de l'instance Aurion.
 	 * À modifier uniquement si votre établissement expose Aurion sur un domaine

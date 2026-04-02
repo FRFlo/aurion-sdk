@@ -1,3 +1,9 @@
+import {
+	createAurionValueCacheKey,
+	isAurionCacheEntryExpired,
+	isAurionValueCacheEntry,
+	resolveAurionCacheConfig,
+} from "./cache";
 import { createAurionError, isAurionError } from "./errors";
 import { parseAbsences, toAurionAbsence } from "./parsers/absences";
 import { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
@@ -9,6 +15,7 @@ import {
 import { parseDateOrThrow, parseIdInit, parseMenuId, parseViewState } from "./parsers/shared";
 import { AurionTransport } from "./transport";
 import type {
+	AurionCacheStore,
 	AurionAbsence,
 	AurionGrade,
 	AurionPlanningEvent,
@@ -26,40 +33,53 @@ const FORM_URLENCODED_HEADERS = {
 } as const;
 
 /**
- * Session Aurion de haut niveau, responsable du flux d'authentification
- * puis de navigation jusqu'au tableau des notes.
- *
- * C'est le point d'entrée principal du SDK pour ouvrir une session
- * puis récupérer les notes de l'utilisateur authentifié.
- */
+	 * Session Aurion de haut niveau, responsable de l'authentification,
+	 * de la navigation dans l'interface et de la récupération des données SDK.
+	 *
+	 * C'est le point d'entrée principal du SDK pour ouvrir une session puis
+	 * récupérer les notes, le planning et les absences de l'utilisateur
+	 * authentifié, avec un cache optionnel partagé avec la couche HTTP.
+	 */
 export class AurionSession {
 	/** Identifiant Aurion utilisé pour ouvrir la session distante. */
 	readonly username: string;
 	/** Mot de passe transmis à Aurion lors de l'authentification. */
 	readonly password: string;
-	/** Indique si le cache interne des réponses HTTP est activé pour cette session. */
+	/** Indique si un store de cache est configuré pour cette session. */
 	readonly cache: boolean;
+	/** Store de cache effectivement utilisé par la session et par le transport HTTP. */
+	readonly cacheStore: AurionCacheStore | null;
 	/** URL de base de l'instance Aurion ciblée par la session. */
 	readonly baseUrl: string;
 	private readonly transport: AurionTransport;
+	private readonly sessionCacheMaxAgeMs?: number;
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
 	 *
 	 * Les appels réseau ne sont pas déclenchés au constructeur ; l'authentification
-	 * réelle a lieu lors du premier appel à {@link getGrades}.
+	 * réelle a lieu lors du premier appel qui doit contacter Aurion, par exemple
+	 * via {@link getGrades}, {@link getPlanning} ou {@link getAbsences}.
+	 *
+	 * Le cache éventuel est normalisé ici puis partagé entre les valeurs mises en
+	 * cache par la session et les réponses HTTP du transport.
 	 *
 	 * @param options Paramètres de session nécessaires pour cibler Aurion.
 	 */
 	constructor(options: AurionSessionOptions) {
+		const cacheConfig = resolveAurionCacheConfig(options.cache);
+
 		this.username = options.username;
 		this.password = options.password;
-		this.cache = options.cache ?? false;
+		this.cache = cacheConfig.store !== null;
+		this.cacheStore = cacheConfig.store;
 		this.baseUrl = options.baseUrl ?? DEFAULT_AURION_BASE_URL;
+		this.sessionCacheMaxAgeMs = cacheConfig.sessionMaxAgeMs;
 		this.transport = new AurionTransport({
 			username: this.username,
 			password: this.password,
-			cache: this.cache,
+			cacheStore: this.cacheStore,
+			cacheMaxAgeMs: cacheConfig.transportMaxAgeMs,
 			baseUrl: this.baseUrl,
 			fetchFn: options.fetchFn,
 		});
@@ -69,13 +89,25 @@ export class AurionSession {
 	 * Récupère les notes Aurion puis les convertit en structure typée.
 	 *
 	 * La méthode gère automatiquement l'authentification, la navigation interne
-	 * dans l'interface Aurion et la normalisation des valeurs retournées.
+	 * dans l'interface Aurion et la normalisation des valeurs retournées. Si un
+	 * cache de session est configuré, une valeur encore valide peut être renvoyée
+	 * directement ; une entrée expirée est supprimée puis recalculée.
 	 *
 	 * @returns La liste des notes normalisées disponibles pour le compte connecté.
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
 	 */
 	async getGrades(): Promise<AurionGrade[]> {
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:grades`,
+		);
+
 		try {
+			const cached = await this.readCachedValue<AurionGrade[]>(cacheKey);
+			if (cached) {
+				return cached;
+			}
+
 			await this.transport.login();
 
 			const state: GradesNavigationState = {
@@ -92,7 +124,10 @@ export class AurionSession {
 
 			const rawGrades = await this.postGrade(state);
 
-			return rawGrades.map((rawGrade) => toAurionGrade(rawGrade));
+			const grades = rawGrades.map((rawGrade) => toAurionGrade(rawGrade));
+			await this.writeCachedValue(cacheKey, grades);
+
+			return grades;
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -110,14 +145,26 @@ export class AurionSession {
 	 * Récupère les événements de planning Aurion sur une fenêtre temporelle donnée.
 	 *
 	 * La méthode orchestre l'authentification, la navigation JSF jusqu'à la page
-	 * de planning puis le parsing du payload d'événements renvoyé par Aurion.
+	 * de planning puis le parsing du payload d'événements renvoyé par Aurion. Le
+	 * cache de session tient compte de la fenêtre demandée ; une entrée expirée est
+	 * invalidée puis remplacée par une nouvelle lecture.
 	 *
 	 * @param options Bornes temporelles optionnelles en objets natifs `Date`.
 	 * @returns La liste des événements de planning normalisés.
 	 * @throws {AurionError} Si une étape réseau, de navigation ou de parsing échoue.
 	 */
 	async getPlanning(options?: AurionPlanningOptions): Promise<AurionPlanningEvent[]> {
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:planning:${serializePlanningOptions(options)}`,
+		);
+
 		try {
+			const cached = await this.readCachedValue<AurionPlanningEvent[]>(cacheKey);
+			if (cached) {
+				return cached;
+			}
+
 			await this.transport.login();
 
 			const state: PlanningNavigationState = {
@@ -154,7 +201,10 @@ export class AurionSession {
 				year,
 			);
 
-			return parsePlanningEvents(response.body);
+			const planning = parsePlanningEvents(response.body);
+			await this.writeCachedValue(cacheKey, planning);
+
+			return planning;
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -172,13 +222,25 @@ export class AurionSession {
 	 * Récupère les absences Aurion puis les convertit en structure typée.
 	 *
 	 * Le flux inclut l'ouverture de session, la navigation vers la rubrique
-	 * « Mes absences » puis l'extraction tabulaire des lignes retournées.
+	 * « Mes absences » puis l'extraction tabulaire des lignes retournées. Si un
+	 * cache de session est actif, une valeur valide peut être réutilisée ; une
+	 * entrée expirée est supprimée avant de relancer la récupération.
 	 *
 	 * @returns La liste des absences normalisées du compte connecté.
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
 	 */
 	async getAbsences(): Promise<AurionAbsence[]> {
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:absences`,
+		);
+
 		try {
+			const cached = await this.readCachedValue<AurionAbsence[]>(cacheKey);
+			if (cached) {
+				return cached;
+			}
+
 			await this.transport.login();
 
 			const state: AbsencesNavigationState = {
@@ -198,7 +260,10 @@ export class AurionSession {
 
 			const rawAbsences = await this.postAbsencesTable(state);
 
-			return rawAbsences.map((rawAbsence) => toAurionAbsence(rawAbsence));
+			const absences = rawAbsences.map((rawAbsence) => toAurionAbsence(rawAbsence));
+			await this.writeCachedValue(cacheKey, absences);
+
+			return absences;
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -602,6 +667,40 @@ export class AurionSession {
 
 		assertNavigationSuccess(step, response.status, response.url);
 	}
+
+	private async readCachedValue<TValue>(key: string): Promise<TValue | null> {
+		if (!this.cacheStore) {
+			return null;
+		}
+
+		const entry = await this.cacheStore.get(key);
+		if (!isAurionValueCacheEntry(entry)) {
+			return null;
+		}
+
+		if (isAurionCacheEntryExpired(entry, this.sessionCacheMaxAgeMs)) {
+			await this.cacheStore.delete(key);
+			return null;
+		}
+
+		return entry.value as TValue;
+	}
+
+	private async writeCachedValue<TValue>(key: string, value: TValue): Promise<void> {
+		if (!this.cacheStore) {
+			return;
+		}
+
+		await this.cacheStore.set(key, {
+			kind: "value",
+			createdAt: Date.now(),
+			value,
+		});
+	}
+
+	private getSessionCacheScope(): string {
+		return `${this.baseUrl}:${this.username}`;
+	}
 }
 
 /** État intermédiaire propagé entre les étapes de navigation Aurion. */
@@ -732,4 +831,11 @@ function getWeekNumber(date: Date): number {
 	const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
 
 	return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+}
+
+function serializePlanningOptions(options?: AurionPlanningOptions): string {
+	const start = options?.start?.toISOString() ?? "default-start";
+	const end = options?.end?.toISOString() ?? "default-end";
+
+	return `${start}:${end}`;
 }
