@@ -53,6 +53,7 @@ export class AurionSession {
 	readonly baseUrl: string;
 	private readonly transport: AurionTransport;
 	private readonly sessionCacheMaxAgeMs?: number;
+	private readonly planningTimeRangeApproximationMs?: number;
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
@@ -75,6 +76,7 @@ export class AurionSession {
 		this.cacheStore = cacheConfig.store;
 		this.baseUrl = options.baseUrl ?? DEFAULT_AURION_BASE_URL;
 		this.sessionCacheMaxAgeMs = cacheConfig.sessionMaxAgeMs;
+		this.planningTimeRangeApproximationMs = cacheConfig.planningTimeRangeApproximationMs;
 		this.transport = new AurionTransport({
 			username: this.username,
 			password: this.password,
@@ -151,15 +153,20 @@ export class AurionSession {
 	 * @throws {AurionError} Si une étape réseau, de navigation ou de parsing échoue.
 	 */
 	async getPlanning(options?: AurionPlanningOptions): Promise<AurionPlanningEvent[]> {
+		const exactWindow = resolvePlanningWindow(options);
+		const cacheWindow = approximatePlanningWindow(
+			exactWindow,
+			this.planningTimeRangeApproximationMs,
+		);
 		const cacheKey = createAurionValueCacheKey(
 			"session",
-			`${this.getSessionCacheScope()}:planning:${serializePlanningOptions(options)}`,
+			`${this.getSessionCacheScope()}:planning:${serializePlanningWindow(cacheWindow)}`,
 		);
 
 		try {
 			const cached = await this.readCachedValue<AurionPlanningEvent[]>(cacheKey);
 			if (cached) {
-				return cached;
+				return filterPlanningEventsByWindow(cached, exactWindow);
 			}
 
 			await this.transport.login();
@@ -179,8 +186,7 @@ export class AurionSession {
 			await this.postSidebarNavigation(state, "getPlanning:postMainSidebar");
 			await this.loadPlanningFormState(state);
 
-			const { startTimestamp, endTimestamp } = resolvePlanningWindow(options);
-			const planningDate = new Date(startTimestamp);
+			const planningDate = new Date(cacheWindow.startTimestamp);
 			const today = planningDate.toLocaleDateString("fr-FR", {
 				day: "2-digit",
 				month: "2-digit",
@@ -191,8 +197,8 @@ export class AurionSession {
 
 			const response = await this.postPlanning(
 				state,
-				startTimestamp,
-				endTimestamp,
+				cacheWindow.startTimestamp,
+				cacheWindow.endTimestamp,
 				today,
 				week,
 				year,
@@ -201,7 +207,7 @@ export class AurionSession {
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
 
-			return planning;
+			return filterPlanningEventsByWindow(planning, exactWindow);
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -830,9 +836,47 @@ function getWeekNumber(date: Date): number {
 	return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
 }
 
-function serializePlanningOptions(options?: AurionPlanningOptions): string {
-	const start = options?.start?.toISOString() ?? "default-start";
-	const end = options?.end?.toISOString() ?? "default-end";
+function approximatePlanningWindow(
+	window: {
+		startTimestamp: number;
+		endTimestamp: number;
+	},
+	approximationMs: number | undefined,
+): {
+	startTimestamp: number;
+	endTimestamp: number;
+} {
+	if (approximationMs === undefined) {
+		return window;
+	}
+
+	return {
+		startTimestamp: Math.floor(window.startTimestamp / approximationMs) * approximationMs,
+		endTimestamp: Math.ceil(window.endTimestamp / approximationMs) * approximationMs,
+	};
+}
+
+function serializePlanningWindow(window: {
+	startTimestamp: number;
+	endTimestamp: number;
+}): string {
+	const start = new Date(window.startTimestamp).toISOString();
+	const end = new Date(window.endTimestamp).toISOString();
 
 	return `${start}:${end}`;
+}
+
+function filterPlanningEventsByWindow(
+	events: AurionPlanningEvent[],
+	window: {
+		startTimestamp: number;
+		endTimestamp: number;
+	},
+): AurionPlanningEvent[] {
+	return events.filter((event) => {
+		const eventStart = event.start.getTime();
+		const eventEnd = event.end.getTime();
+
+		return eventEnd > window.startTimestamp && eventStart < window.endTimestamp;
+	});
 }

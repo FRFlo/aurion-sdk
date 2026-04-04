@@ -54,6 +54,39 @@ export interface AurionCacheStore {
 }
 
 /**
+ * Unité utilisée pour approximer une fenêtre temporelle dans les clés de cache.
+ */
+export type AurionTimeRangeApproximationUnit = "minute" | "hour" | "day";
+
+/**
+ * Politique d'approximation d'une fenêtre temporelle utilisée par le cache.
+ */
+export interface AurionTimeRangeApproximation {
+	/** Unité de découpage de la fenêtre temporelle. */
+	unit: AurionTimeRangeApproximationUnit;
+	/**
+	 * Nombre d'unités composant un bucket.
+	 *
+	 * Par exemple `15` avec `unit: "minute"` approxime par tranches de 15 minutes.
+	 * @default 1
+	 */
+	step?: number;
+}
+
+/**
+ * Options d'approximation de fenêtres temporelles par ressource métier.
+ */
+export interface AurionCacheTimeRangeApproximationOptions {
+	/**
+	 * Approximation appliquée au planning.
+	 *
+	 * La fenêtre demandée est élargie au bucket configuré pour favoriser les hits,
+	 * puis les événements sont refiltrés sur la fenêtre exacte côté SDK.
+	 */
+	planning?: AurionTimeRangeApproximation;
+}
+
+/**
  * Options de configuration du cache public de l'SDK.
  *
  * `maxAgeMs` définit un TTL commun, tandis que `sessionMaxAgeMs` et
@@ -68,6 +101,8 @@ export interface AurionCacheOptions {
 	transportMaxAgeMs?: number;
 	/** TTL spécifique en millisecondes pour les valeurs métier mises en cache par la session. */
 	sessionMaxAgeMs?: number;
+	/** Approximation optionnelle des fenêtres temporelles utilisées comme clés de cache. */
+	timeRangeApproximation?: AurionCacheTimeRangeApproximationOptions;
 }
 
 /**
@@ -80,6 +115,29 @@ export interface ResolvedAurionCacheConfig {
 	transportMaxAgeMs?: number;
 	/** TTL effectif appliqué aux valeurs mises en cache par la session, s'il existe. */
 	sessionMaxAgeMs?: number;
+	/** Taille de bucket appliquée au planning, exprimée en millisecondes. */
+	planningTimeRangeApproximationMs?: number;
+}
+
+const TIME_RANGE_APPROXIMATION_UNIT_TO_MS = {
+	minute: 60_000,
+	hour: 3_600_000,
+	day: 86_400_000,
+} as const satisfies Record<AurionTimeRangeApproximationUnit, number>;
+
+function resolveTimeRangeApproximationMs(
+	approximation: AurionTimeRangeApproximation | undefined,
+): number | undefined {
+	if (!approximation) {
+		return undefined;
+	}
+
+	const step = approximation.step ?? 1;
+	if (!Number.isInteger(step) || step < 1) {
+		throw new RangeError("Aurion cache time range approximation step must be a positive integer.");
+	}
+
+	return TIME_RANGE_APPROXIMATION_UNIT_TO_MS[approximation.unit] * step;
 }
 
 /**
@@ -153,6 +211,9 @@ export function resolveAurionCacheConfig(
 		store: cache.store ?? new InMemoryAurionCache(),
 		transportMaxAgeMs: cache.transportMaxAgeMs ?? cache.maxAgeMs,
 		sessionMaxAgeMs: cache.sessionMaxAgeMs ?? cache.maxAgeMs,
+		planningTimeRangeApproximationMs: resolveTimeRangeApproximationMs(
+			cache.timeRangeApproximation?.planning,
+		),
 	};
 }
 

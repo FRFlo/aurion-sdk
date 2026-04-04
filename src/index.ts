@@ -22,10 +22,13 @@ export type {
 	AurionCacheEntry,
 	AurionCacheOptions,
 	AurionCacheStore,
+	AurionCacheTimeRangeApproximationOptions,
 	AurionGrade,
 	AurionPlanningEvent,
 	AurionPlanningOptions,
 	AurionSessionOptions,
+	AurionTimeRangeApproximation,
+	AurionTimeRangeApproximationUnit,
 } from "./types";
 export { parseAbsences, toAurionAbsence } from "./parsers/absences";
 export { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";

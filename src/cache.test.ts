@@ -87,6 +87,19 @@ describe("cache configuration", () => {
 		expect(cacheConfig.transportMaxAgeMs).toBe(5_000);
 	});
 
+	test("resolveAurionCacheConfig maps planning time range approximation", () => {
+		const cacheConfig = resolveAurionCacheConfig({
+			timeRangeApproximation: {
+				planning: {
+					unit: "minute",
+					step: 15,
+				},
+			},
+		});
+
+		expect(cacheConfig.planningTimeRangeApproximationMs).toBe(900_000);
+	});
+
 	test("AurionSession uses preloaded cached grades before hitting the network", async () => {
 		const cacheStore = new InMemoryAurionCache();
 		const cachedGrades = [
@@ -155,6 +168,69 @@ describe("cache configuration", () => {
 
 		await expect(session.getPlanning(planningWindow)).resolves.toEqual(cachedPlanning);
 		await expect(session.getAbsences()).resolves.toEqual(cachedAbsences);
+	});
+
+	test("AurionSession approximates planning windows for cache hits while preserving the exact returned range", async () => {
+		const cacheStore = new InMemoryAurionCache();
+		const requestedWindow = {
+			start: new Date("2025-01-01T10:02:00.000Z"),
+			end: new Date("2025-01-01T10:58:00.000Z"),
+		};
+		const approximatedWindow = {
+			start: new Date("2025-01-01T10:00:00.000Z"),
+			end: new Date("2025-01-01T11:00:00.000Z"),
+		};
+		const expectedPlanning = {
+			id: "event-inside",
+			title: "Inside",
+			start: new Date("2025-01-01T10:15:00.000Z"),
+			end: new Date("2025-01-01T10:45:00.000Z"),
+			allDay: false,
+			editable: false,
+			type: "Cours",
+		};
+		const cachedPlanning = [
+			{
+				id: "event-before",
+				title: "Before",
+				start: new Date("2025-01-01T09:55:00.000Z"),
+				end: new Date("2025-01-01T10:01:00.000Z"),
+				allDay: false,
+				editable: false,
+				type: "Cours",
+			},
+			expectedPlanning,
+			{
+				id: "event-after",
+				title: "After",
+				start: new Date("2025-01-01T10:58:00.000Z"),
+				end: new Date("2025-01-01T11:10:00.000Z"),
+				allDay: false,
+				editable: false,
+				type: "Cours",
+			},
+		];
+
+		await seedSessionValue(
+			cacheStore,
+			{
+				resource: "planning",
+				suffix: `${approximatedWindow.start.toISOString()}:${approximatedWindow.end.toISOString()}`,
+			},
+			cachedPlanning,
+			Date.now(),
+		);
+
+		const session = createSession({
+			store: cacheStore,
+			timeRangeApproximation: {
+				planning: {
+					unit: "hour",
+				},
+			},
+		});
+
+		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([expectedPlanning]);
 	});
 
 	test("AurionSession cache keys include baseUrl to avoid collisions across instances", async () => {

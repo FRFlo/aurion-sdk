@@ -2,7 +2,12 @@ import type { AurionCacheOptions, AurionCacheStore } from "./cache";
 
 export type { AurionCacheEntry, AurionCacheStore, AurionTransportCacheEntry } from "./cache";
 export type { AurionValueCacheEntry } from "./cache";
-export type { AurionCacheOptions } from "./cache";
+export type {
+	AurionCacheOptions,
+	AurionCacheTimeRangeApproximationOptions,
+	AurionTimeRangeApproximation,
+	AurionTimeRangeApproximationUnit,
+} from "./cache";
 
 /**
  * Options de configuration pour créer une session Aurion.
