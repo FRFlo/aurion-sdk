@@ -233,6 +233,101 @@ describe("cache configuration", () => {
 		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([expectedPlanning]);
 	});
 
+	test("AurionSession sends the approximated planning window in the network request", async () => {
+		const requestedWindow = {
+			start: new Date("2025-01-01T10:02:00.000Z"),
+			end: new Date("2025-01-01T10:58:00.000Z"),
+		};
+		const capturedPlanningRequests: URLSearchParams[] = [];
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly",
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-root"><input name="form:idInit" value="root-id">',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "GET") {
+				return new Response(
+					"<a onclick=\"PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'planning-menu'})\"><span class=\"ui-menuitem-icon ui-icon fa fa-calendar-alt\"></span><span class=\"ui-menuitem-text\">Mon Planning</span></a>",
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				return new Response("sidebar-ok", { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-planning"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				capturedPlanningRequests.push(new URLSearchParams(init?.body?.toString() ?? ""));
+				return new Response(
+					'[{"id":"event-inside","title":"Inside","start":"2025-01-01T10:15:00.000Z","end":"2025-01-01T10:45:00.000Z","allDay":false,"editable":false,"className":"Cours"}]',
+					{ status: 200 },
+				);
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(
+			{
+				timeRangeApproximation: {
+					planning: {
+						unit: "hour",
+					},
+				},
+			},
+			{ fetchFn },
+		);
+
+		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([
+			{
+				id: "event-inside",
+				title: "Inside",
+				start: new Date("2025-01-01T10:15:00.000Z"),
+				end: new Date("2025-01-01T10:45:00.000Z"),
+				allDay: false,
+				editable: false,
+				type: "Cours",
+			},
+		]);
+
+		expect(capturedPlanningRequests).toHaveLength(1);
+
+		const planningRequest = capturedPlanningRequests[0];
+		if (!planningRequest) {
+			throw new Error("Expected one captured planning request");
+		}
+
+		expect(planningRequest.get("form:planning_start")).toBe(
+			String(new Date("2025-01-01T10:00:00.000Z").getTime()),
+		);
+		expect(planningRequest.get("form:planning_end")).toBe(
+			String(new Date("2025-01-01T11:00:00.000Z").getTime()),
+		);
+		expect(planningRequest.get("form:date_input")).toBe("01/01/2025");
+		expect(planningRequest.get("form:week")).toBe("01-2025");
+	});
+
 	test("AurionSession cache keys include baseUrl to avoid collisions across instances", async () => {
 		const cacheStore = new InMemoryAurionCache();
 		let fetchCount = 0;

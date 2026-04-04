@@ -856,10 +856,7 @@ function approximatePlanningWindow(
 	};
 }
 
-function serializePlanningWindow(window: {
-	startTimestamp: number;
-	endTimestamp: number;
-}): string {
+function serializePlanningWindow(window: { startTimestamp: number; endTimestamp: number }): string {
 	const start = new Date(window.startTimestamp).toISOString();
 	const end = new Date(window.endTimestamp).toISOString();
 
