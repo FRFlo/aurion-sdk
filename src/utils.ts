@@ -22,7 +22,20 @@ export function parseAurionPlanningTitle(
 	normalize: boolean = true,
 ): ParsedAurionPlanningTitle {
 	const rawParts = title.split("\n").map((part) => part.trim());
-	const [location, additionalInfo, subject, courseType, professor] = rawParts;
+
+	if (rawParts.length < 5) {
+		throw createAurionError(
+			"AURION_PARSING_ERROR",
+			`Format de titre de planning invalide, moins de 4 lignes détectées : ${title}`,
+			{ title },
+		);
+	}
+
+	const location = rawParts[0] ?? "";
+	const professor = rawParts[rawParts.length - 1] ?? "";
+	const courseType = rawParts[rawParts.length - 2] ?? "";
+	const subject = rawParts[rawParts.length - 3] ?? "";
+	const additionalInfo = rawParts.slice(1, -3).join("\n");
 
 	return {
 		location: normalizeText(location, normalize),
