@@ -23,7 +23,11 @@ export function parseAurionPlanningTitle(
 ): ParsedAurionPlanningTitle {
 	const rawParts = title.split("\n").map((part) => part.trim());
 
-	if (rawParts.length < 5) {
+	if (!Boolean(rawParts[0])) {
+		rawParts.shift();
+	}
+
+	if (rawParts.length < 4) {
 		throw createAurionError(
 			"AURION_PARSING_ERROR",
 			`Format de titre de planning invalide, moins de 4 lignes détectées : ${title}`,
