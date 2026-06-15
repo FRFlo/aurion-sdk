@@ -23,7 +23,7 @@ export function parseAurionPlanningTitle(
 ): ParsedAurionPlanningTitle {
 	const rawParts = title.split("\n").map((part) => part.trim());
 
-	if (!Boolean(rawParts[0])) {
+	if (!rawParts[0]) {
 		rawParts.shift();
 	}
 
