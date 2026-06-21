@@ -470,7 +470,19 @@ export class AurionSession {
 		await this.transport.login();
 		const choixPlanning = await this.openChoixPlanning(menuId, "getAvailablePlannings");
 		const plannings = parseAvailablePlannings(choixPlanning.body);
-		return plannings.map((p) => new AurionAvailablePlanning(p.name, p.id, menuId, this));
+		return plannings.map(
+			(p) =>
+				new AurionAvailablePlanning(
+					p.name,
+					p.code,
+					p.label,
+					p.validityEnd,
+					p.kind,
+					p.id,
+					menuId,
+					this,
+				),
+		);
 	}
 
 	/**

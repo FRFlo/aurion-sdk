@@ -121,7 +121,14 @@ export function parseMenuChildren(body: string, parentSubmenuId: string): Promot
  * @returns Les identifiants et libellés des plannings disponibles.
  * @throws {AurionError} Si la table ne contient aucune ligne exploitable.
  */
-export function parseAvailablePlannings(body: string): { id: string; name: string }[] {
+export function parseAvailablePlannings(body: string): Array<{
+	id: string;
+	name: string;
+	code: string;
+	label: string;
+	validityEnd: string;
+	kind: string;
+}> {
 	const rows = Array.from(body.matchAll(/<tr[^>]*data-rk="([^"]+)"[^>]*>([\s\S]*?)<\/tr>/g));
 	if (rows.length === 0) {
 		throwParsingError(body, "parseAvailablePlannings", "Planning selection table rows not found");
@@ -134,11 +141,15 @@ export function parseAvailablePlannings(body: string): { id: string; name: strin
 			const cells = Array.from(rowBody.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g), (match) =>
 				normalizeText(match[1] ?? ""),
 			);
-			const name = cells.find((cell) => cell.length > 0) ?? "";
+			const [selection = "", code = "", label = "", validityEnd = "", kind = ""] = cells;
+			void selection;
+			const name = label;
 
-			return { id, name };
+			return { id, name, code, label, validityEnd, kind };
 		})
-		.filter((planning) => planning.id.length > 0 && planning.name.length > 0);
+		.filter(
+			(planning) => planning.id.length > 0 && planning.code.length > 0 && planning.label.length > 0,
+		);
 
 	if (plannings.length === 0) {
 		throwParsingError(

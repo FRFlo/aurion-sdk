@@ -97,6 +97,14 @@ export class AurionPlanningSubgroup {
 export class AurionAvailablePlanning {
 	/** Libellé complet de la ligne de planning affichée par Aurion. */
 	public readonly name: string;
+	/** Code de planning affiché par Aurion dans la première colonne métier. */
+	public readonly code: string;
+	/** Premier libellé métier affiché par Aurion. */
+	public readonly label: string;
+	/** Fin de validité affichée par Aurion pour ce planning. */
+	public readonly validityEnd: string;
+	/** Second libellé métier affiché par Aurion, par ex. « Promotion » ou « Planning ». */
+	public readonly kind: string;
 	/** Identifiant de ligne `data-rk` utilisé par la table PrimeFaces. */
 	public readonly id: string;
 	/** Identifiant du sous-groupe parent dans le menu latéral Aurion. */
@@ -108,12 +116,29 @@ export class AurionAvailablePlanning {
 	 * Crée une représentation SDK d'un planning disponible.
 	 *
 	 * @param name Libellé complet du planning.
+	 * @param code Code de planning affiché dans `ChoixPlanning.xhtml`.
+	 * @param label Premier libellé métier de la ligne.
+	 * @param validityEnd Fin de validité textuelle affichée par Aurion.
+	 * @param kind Second libellé métier de la ligne.
 	 * @param id Identifiant PrimeFaces de la ligne sélectionnable.
 	 * @param menuId Identifiant du sous-groupe parent.
 	 * @param session Session capable de charger les événements du planning.
 	 */
-	constructor(name: string, id: string, menuId: string, session: AurionPlanningNavigator) {
+	constructor(
+		name: string,
+		code: string,
+		label: string,
+		validityEnd: string,
+		kind: string,
+		id: string,
+		menuId: string,
+		session: AurionPlanningNavigator,
+	) {
 		this.name = name;
+		this.code = code;
+		this.label = label;
+		this.validityEnd = validityEnd;
+		this.kind = kind;
 		this.id = id;
 		this.menuId = menuId;
 		this.session = session;
