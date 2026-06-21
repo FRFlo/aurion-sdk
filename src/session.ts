@@ -11,8 +11,18 @@ import {
 	parseFormIdPlanning,
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
+	parseEventDetails,
 } from "./parsers/planning";
-import { parseDateOrThrow, parseIdInit, parseMenuId, parseViewState } from "./parsers/shared";
+import {
+	parseDateOrThrow,
+	parseIdInit,
+	parseMenuId,
+	parseViewState,
+	extractTags,
+	extractElementBlocks,
+	stripTags,
+	normalizeWhitespace,
+} from "./parsers/shared";
 import { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
 import {
 	AurionPlanningGroup,
@@ -26,6 +36,7 @@ import type {
 	AurionAbsence,
 	AurionGrade,
 	AurionPlanningEvent,
+	AurionPlanningEventDetails,
 	AurionPlanningOptions,
 	AurionSessionOptions,
 	RawAurionAbsenceRow,
@@ -178,9 +189,10 @@ export class AurionSession {
 		);
 
 		try {
-			const cached = await this.readCachedValue<AurionPlanningEvent[]>(cacheKey);
+			const cached =
+				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
 			if (cached) {
-				return filterPlanningEventsByWindow(cached, exactWindow);
+				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
 			}
 
 			await this.transport.login();
@@ -217,7 +229,7 @@ export class AurionSession {
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
 
-			return filterPlanningEventsByWindow(planning, exactWindow);
+			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -229,6 +241,96 @@ export class AurionSession {
 				error,
 			);
 		}
+	}
+
+	/**
+	 * Récupère les détails d'un événement de planning.
+	 *
+	 * @param eventId L'identifiant de l'événement.
+	 * @returns Les détails de l'événement.
+	 * @throws {AurionError} Si la récupération ou le parsing échoue.
+	 */
+	async getEventDetails(eventId: string): Promise<AurionPlanningEventDetails> {
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:eventDetails:${eventId}`,
+		);
+
+		try {
+			const cached = await this.readCachedValue<AurionPlanningEventDetails>(cacheKey);
+			if (cached) {
+				return cached;
+			}
+
+			await this.transport.login();
+
+			const state: PlanningNavigationState = {
+				viewState: "",
+				menuId: "",
+				idInit: "",
+				formIdPlanning: "",
+			};
+
+			await this.initializeRootNavigationState(state, {
+				includeFormId: false,
+			});
+
+			await this.loadPlanningSidebarMenuId(state);
+			await this.postSidebarNavigation(state, "getEventDetails:postMainSidebar");
+			await this.loadPlanningFormState(state);
+
+			const sourceId = state.formIdPlanning;
+			const postData = state.planningPageBody
+				? createUrlSearchParamsFromForm(state.planningPageBody)
+				: new URLSearchParams();
+
+			const requestFields: Record<string, string> = {
+				"javax.faces.partial.ajax": "true",
+				"javax.faces.source": sourceId,
+				"javax.faces.partial.execute": sourceId,
+				"javax.faces.partial.render": "form:modaleDetail form:confirmerSuppression",
+				"javax.faces.behavior.event": "eventSelect",
+				"javax.faces.partial.event": "eventSelect",
+				[`${sourceId}_selectedEventId`]: eventId,
+				"javax.faces.ViewState": state.viewState,
+			};
+
+			overlayParams(postData, requestFields);
+
+			const response = await this.transport.request({
+				path: "/faces/Planning.xhtml",
+				method: "POST",
+				body: postData,
+				headers: { ...PRIMEFACES_AJAX_HEADERS, Referer: `${this.baseUrl}/faces/Planning.xhtml` },
+				cache: false,
+			});
+
+			assertNavigationSuccess("getEventDetails:postEventSelect", response.status, response.url);
+
+			const details = parseEventDetails(response.body, eventId);
+			await this.writeCachedValue(cacheKey, details);
+
+			return details;
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des détails de l'événement.",
+				error,
+			);
+		}
+	}
+
+	private attachEventMethods(
+		events: Array<Omit<AurionPlanningEvent, "getDetails">>,
+	): AurionPlanningEvent[] {
+		return events.map((event) => ({
+			...event,
+			getDetails: () => this.getEventDetails(event.id),
+		}));
 	}
 
 	/**
@@ -400,9 +502,10 @@ export class AurionSession {
 		);
 
 		try {
-			const cached = await this.readCachedValue<AurionPlanningEvent[]>(cacheKey);
+			const cached =
+				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
 			if (cached) {
-				return filterPlanningEventsByWindow(cached, exactWindow);
+				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
 			}
 
 			await this.transport.login();
@@ -438,7 +541,7 @@ export class AurionSession {
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
 
-			return filterPlanningEventsByWindow(planning, exactWindow);
+			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -1408,34 +1511,6 @@ function extractFormBlock(body: string, formId: string): string {
 }
 
 /**
- * Extrait toutes les occurrences d'une balise HTML orpheline (comme `<input>`).
- *
- * @param body Le bloc HTML dans lequel rechercher.
- * @param tagName Le nom de la balise (ex: `input`).
- * @returns Un tableau contenant chaque balise correspondante.
- */
-function extractTags(body: string, tagName: string): string[] {
-	return Array.from(body.matchAll(new RegExp(`<${tagName}\\b[^>]*>`, "gi")), (match) => match[0]);
-}
-
-/**
- * Extrait toutes les occurrences d'une balise HTML complète avec son contenu (ex: `<select>...</select>`).
- *
- * NOTE: Cette fonction utilise une expression régulière simple et ne supporte pas l'imbrication
- * de balises du même type. Elle convient aux éléments tels que `textarea` ou `select`.
- *
- * @param body Le bloc HTML dans lequel rechercher.
- * @param tagName Le nom de la balise (ex: `select`).
- * @returns Un tableau contenant chaque bloc HTML correspondant.
- */
-function extractElementBlocks(body: string, tagName: string): string[] {
-	return Array.from(
-		body.matchAll(new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}>`, "gi")),
-		(match) => match[0],
-	);
-}
-
-/**
  * Analyse les attributs d'une balise HTML ouvrante.
  *
  * @param tag La balise ouvrante (ex: `<input type="text" name="foo">`).
@@ -1489,26 +1564,6 @@ function findFirstOption(selectBlock: string): string | null {
 	const attributes = parseHtmlAttributes(openingTag);
 
 	return attributes.get("value") ?? decodeHtmlAttribute(stripTags(option));
-}
-
-/**
- * Supprime toutes les balises HTML d'une chaîne pour n'en conserver que le texte.
- *
- * @param html La chaîne de caractères contenant du HTML.
- * @returns Le texte brut sans balises, nettoyé des espaces aux extrémités.
- */
-function stripTags(html: string): string {
-	return html.replaceAll(/<[^>]*>/g, "").trim();
-}
-
-/**
- * Normalise les espaces d'une chaîne de caractères après avoir décodé les entités HTML.
- *
- * @param input La chaîne à normaliser.
- * @returns La chaîne avec les espaces consécutifs réduits à un seul, sans espaces aux extrémités.
- */
-function normalizeWhitespace(input: string): string {
-	return decodeHtmlAttribute(input).replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -1837,13 +1892,13 @@ function serializePlanningWindow(window: { startTimestamp: number; endTimestamp:
 	return `${start}:${end}`;
 }
 
-function filterPlanningEventsByWindow(
-	events: AurionPlanningEvent[],
+function filterPlanningEventsByWindow<T extends { start: Date; end: Date }>(
+	events: T[],
 	window: {
 		startTimestamp: number;
 		endTimestamp: number;
 	},
-): AurionPlanningEvent[] {
+): T[] {
 	return events.filter((event) => {
 		const eventStart = event.start.getTime();
 		const eventEnd = event.end.getTime();

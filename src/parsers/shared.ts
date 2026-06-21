@@ -116,6 +116,47 @@ export function decodeHtmlEntities(input: string): string {
 		.replaceAll("&#39;", "'");
 }
 
+export function extractTags(body: string, tagName: string): string[] {
+	return Array.from(body.matchAll(new RegExp(`<${tagName}\\b[^>]*>`, "gi")), (match) => match[0]);
+}
+
+/**
+ * Extrait toutes les occurrences d'une balise HTML complète avec son contenu (ex: `<select>...</select>`).
+ *
+ * NOTE: Cette fonction utilise une expression régulière simple et ne supporte pas l'imbrication
+ * de balises du même type. Elle convient aux éléments tels que `textarea` ou `select`.
+ *
+ * @param body Le bloc HTML dans lequel rechercher.
+ * @param tagName Le nom de la balise (ex: `select`).
+ * @returns Un tableau contenant chaque bloc HTML correspondant.
+ */
+export function extractElementBlocks(body: string, tagName: string): string[] {
+	return Array.from(
+		body.matchAll(new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}>`, "gi")),
+		(match) => match[0],
+	);
+}
+
+/**
+ * Supprime toutes les balises HTML d'une chaîne pour n'en conserver que le texte.
+ *
+ * @param html La chaîne de caractères contenant du HTML.
+ * @returns Le texte brut sans balises, nettoyé des espaces aux extrémités.
+ */
+export function stripTags(html: string): string {
+	return html.replaceAll(/<[^>]*>/g, "").trim();
+}
+
+/**
+ * Normalise les espaces d'une chaîne de caractères après avoir décodé les entités HTML.
+ *
+ * @param input La chaîne à normaliser.
+ * @returns La chaîne avec les espaces consécutifs réduits à un seul, sans espaces aux extrémités.
+ */
+export function normalizeWhitespace(input: string): string {
+	return decodeHtmlEntities(input).replace(/\s+/g, " ").trim();
+}
+
 /**
  * Lance une `AurionError` standardisée pour homogénéiser les erreurs de parsing.
  *

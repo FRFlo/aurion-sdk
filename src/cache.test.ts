@@ -166,7 +166,12 @@ describe("cache configuration", () => {
 
 		const session = createSession(cacheStore);
 
-		await expect(session.getPlanning(planningWindow)).resolves.toEqual(cachedPlanning);
+		await expect(session.getPlanning(planningWindow)).resolves.toEqual(
+			cachedPlanning.map((event) => ({
+				...event,
+				getDetails: expect.any(Function),
+			})),
+		);
 		await expect(session.getAbsences()).resolves.toEqual(cachedAbsences);
 	});
 
@@ -230,7 +235,12 @@ describe("cache configuration", () => {
 			},
 		});
 
-		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([expectedPlanning]);
+		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([
+			{
+				...expectedPlanning,
+				getDetails: expect.any(Function),
+			},
+		]);
 	});
 
 	test("AurionSession sends the approximated planning window in the network request", async () => {
@@ -272,7 +282,7 @@ describe("cache configuration", () => {
 
 			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
 				return new Response(
-					'<input name="javax.faces.ViewState" value="view-planning"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>',
+					'<form id="form"><input name="javax.faces.ViewState" value="view-planning"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script></form>',
 					{ status: 200 },
 				);
 			}
@@ -308,6 +318,7 @@ describe("cache configuration", () => {
 				allDay: false,
 				editable: false,
 				type: "Cours",
+				getDetails: expect.any(Function),
 			},
 		]);
 
