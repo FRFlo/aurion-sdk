@@ -49,7 +49,8 @@ export function parseSidebarMenuIdForMonPlanning(body: string): string {
  * @throws {AurionError} Si le payload JSON est absent, invalide ou contient des événements mal formés.
  */
 export function parsePlanningEvents(body: string): AurionPlanningEvent[] {
-	const payloadMatch = body.match(/(\[\{"id"[\s\S]*?}])/);
+	const payloadMatch =
+		body.match(/(\[\{"id"[\s\S]*?}])/) ?? body.match(/\{\s*"events"\s*:\s*(\[[\s\S]*?])\s*}/);
 	if (!payloadMatch?.[1]) {
 		throwParsingError(body, "parsePlanningEvents", "Planning JSON payload not found");
 	}

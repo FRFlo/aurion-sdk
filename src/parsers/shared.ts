@@ -18,11 +18,18 @@ export interface ParsingErrorDetails {
  */
 export function parseViewState(body: string): string {
 	const match = body.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
-	if (!match?.[1]) {
-		throwParsingError(body, "parseViewState", "Missing javax.faces.ViewState input");
+	if (match?.[1]) {
+		return match[1];
 	}
 
-	return match[1];
+	const partialMatch = body.match(
+		/<update[^>]*javax\.faces\.ViewState[^>]*><!\[CDATA\[([^\]]+)\]\]><\/update>/,
+	);
+	if (partialMatch?.[1]) {
+		return partialMatch[1];
+	}
+
+	throwParsingError(body, "parseViewState", "Missing javax.faces.ViewState input");
 }
 
 /**

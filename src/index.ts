@@ -53,5 +53,7 @@ export {
 	decodeHtmlEntities,
 	throwParsingError,
 } from "./parsers/shared";
+export { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
+export { AurionPlanningGroup, AurionPlanningSubgroup, AurionAvailablePlanning } from "./promotions";
 export type { ParsingErrorDetails } from "./parsers/shared";
 export type { ParsedAurionPlanningTitle } from "./utils";
