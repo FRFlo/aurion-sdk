@@ -706,19 +706,7 @@ export class AurionSession {
 		year: string,
 	): Promise<{ body: string }> {
 		const sourceId = state.formIdPlanning;
-		const postData = state.planningPageBody
-			? createUrlSearchParamsFromForm(state.planningPageBody)
-			: new URLSearchParams({
-					...createMainMenuCommonFields(state.idInit, ""),
-					"form:date_input": today,
-					"form:week": `${week}-${year}`,
-					"form:offsetFuseauNavigateur": "-7200000",
-					"form:onglets_activeIndex": "0",
-					"form:onglets_scrollState": "0",
-					...createFormFocusAndInputFields("form:j_idt244_focus", "form:j_idt244_input"),
-				});
-
-		const planningFields: Record<string, string> = {
+		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
 			"javax.faces.source": sourceId,
 			"javax.faces.partial.execute": sourceId,
@@ -726,32 +714,23 @@ export class AurionSession {
 			[sourceId]: sourceId,
 			[`${sourceId}_start`]: String(startTimestamp),
 			[`${sourceId}_end`]: String(endTimestamp),
+			...createMainMenuCommonFields(state.idInit, ""),
 			"form:largeurDivCenter": "",
 			"form:date_input": today,
 			"form:week": `${week}-${year}`,
-			[`${sourceId}_view`]: postData.get(`${sourceId}_view`) || "agendaWeek",
-			"form:offsetFuseauNavigateur": postData.get("form:offsetFuseauNavigateur") || "-7200000",
+			[`${sourceId}_view`]: "agendaWeek",
+			"form:offsetFuseauNavigateur": "-7200000",
+			"form:onglets_activeIndex": "0",
+			"form:onglets_scrollState": "0",
+			...createFormFocusAndInputFields("form:j_idt244_focus", "form:j_idt244_input"),
 			"javax.faces.ViewState": state.viewState,
-		};
-
-		if (postData.has("form:onglets_activeIndex")) {
-			planningFields["form:onglets_activeIndex"] = postData.get("form:onglets_activeIndex") ?? "0";
-		}
-
-		if (postData.has("form:onglets_scrollState")) {
-			planningFields["form:onglets_scrollState"] = postData.get("form:onglets_scrollState") ?? "0";
-		}
-
-		overlayParams(postData, planningFields);
+		});
 
 		const response = await this.transport.request({
 			path: "/faces/Planning.xhtml",
 			method: "POST",
 			body: postData,
-			headers: {
-				...PRIMEFACES_AJAX_HEADERS,
-				Referer: `${this.baseUrl}/faces/Planning.xhtml`,
-			},
+			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
 		});
 
