@@ -398,7 +398,7 @@ export class AurionSession {
 	 * @returns Les détails complets affichés par Aurion pour cet événement.
 	 * @throws {AurionError} Si la navigation, la requête AJAX ou le parsing échoue.
 	 */
-	async getEventDetails(eventId: string): Promise<AurionPlanningEventDetails> {
+	async getEventDetails(eventId: string, options?: { date?: Date }): Promise<AurionPlanningEventDetails> {
 		const cacheKey = createAurionValueCacheKey(
 			"session",
 			`${this.getSessionCacheScope()}:eventDetails:${eventId}`,
@@ -415,7 +415,7 @@ export class AurionSession {
 			const response = await this.withNavigationRetry("planningPage", async () => {
 				const state = await this.resolvePlanningPageNode();
 
-				return this.postEventDetails(state, eventId);
+				return this.postEventDetails(state, eventId, options?.date);
 			});
 
 			const details = parseEventDetails(response.body, eventId);
@@ -964,9 +964,10 @@ export class AurionSession {
 	private async postEventDetails(
 		state: PlanningNavigationState,
 		eventId: string,
+		date?: Date,
 	): Promise<{ body: string }> {
 		const sourceId = state.formIdPlanning;
-		const fallbackDate = new Date();
+		const fallbackDate = date ?? new Date();
 		const today = fallbackDate.toLocaleDateString("fr-FR", {
 			day: "2-digit",
 			month: "2-digit",
@@ -1320,7 +1321,7 @@ export class AurionSession {
 	): AurionPlanningEvent[] {
 		return events.map((event) => ({
 			...event,
-			getDetails: () => this.getEventDetails(event.id),
+			getDetails: () => this.getEventDetails(event.id, { date: event.start }),
 		}));
 	}
 }

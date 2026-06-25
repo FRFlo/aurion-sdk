@@ -3,11 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { parseEventDetails, parsePlanningEvents } from "./planning";
 
 describe("parseEventDetails", () => {
-	test("parses the saved empty planning events partial response", async () => {
-		const body = await Bun.file("aurion-cursus-161-response-body.txt").text();
-
-		expect(parsePlanningEvents(body)).toEqual([]);
-	});
+	test("parses the saved empty planning events partial response", () => {
+  const body = `<update id="form:j_idt118"><![CDATA[{"events" : []}]]></update>`;
+  expect(parsePlanningEvents(body)).toEqual([]);
+});
 
 	test("parses populated planning events whose titles contain square brackets", () => {
 		const payload = JSON.stringify({

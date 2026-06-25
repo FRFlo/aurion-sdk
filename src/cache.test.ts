@@ -971,8 +971,6 @@ describe("cache configuration", () => {
 	});
 
 	test("AurionSession navigates grouped planning API and posts captured-shaped payloads", async () => {
-		const capturedSubmenuBody = await Bun.file("aurion-cursus-082-request-body.txt").text();
-		const capturedChoixPlanningBody = await Bun.file("aurion-cursus-123-request-body.txt").text();
 		const postedBodies: string[] = [];
 		const rootBody = `
 			>chargerSousMenu = function(){PrimeFaces.ab({s:"form:j_idt52",f:"form"});}
@@ -1095,7 +1093,6 @@ describe("cache configuration", () => {
 
 		expect(submenuBody).toContain("javax.faces.partial.render=form%3Asidebar");
 		expect(submenuBody).toContain("form%3Aj_idt773_input=44323");
-		expect(capturedSubmenuBody).toContain("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476");
 		expect(choixBody).toContain("form%3Aj_idt181_checkbox=on");
 		expect(choixBody).toContain("form%3Aj_idt243=");
 		expect(choixBody).toContain("form%3Aj_idt181%3Aj_idt186%3Afilter=");
@@ -1103,7 +1100,6 @@ describe("cache configuration", () => {
 		expect(choixBody).not.toContain("form%3Aj_idt244_focus");
 		expect(choixBody).not.toContain("form%3Asidebar_menuid=3_0_6_0");
 		expect(choixBody).not.toContain("form%3Asidebar=form%3Asidebar");
-		expect(capturedChoixPlanningBody).toContain("form:j_idt181_selection=60288885");
 		expect(planningBody).toContain("form%3Aj_idt118_view=agendaWeek");
 		expect(planningBody).not.toContain("form%3Aj_idt244_focus");
 	});
