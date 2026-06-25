@@ -195,7 +195,9 @@ describe("cache configuration", () => {
 
 		const session = createSession(cacheStore);
 
-		await expect(session.getPlanning(planningWindow)).resolves.toEqual(cachedPlanning);
+		const planning = await session.getPlanning(planningWindow);
+		expect(planning).toMatchObject(cachedPlanning);
+		expect(typeof planning[0]?.getDetails).toBe("function");
 		await expect(session.getAbsences()).resolves.toEqual(cachedAbsences);
 	});
 
@@ -259,7 +261,9 @@ describe("cache configuration", () => {
 			},
 		});
 
-		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([expectedPlanning]);
+		const planning = await session.getPlanning(requestedWindow);
+		expect(planning).toMatchObject([expectedPlanning]);
+		expect(typeof planning[0]?.getDetails).toBe("function");
 	});
 
 	test("AurionSession sends the approximated planning window in the network request", async () => {
@@ -328,7 +332,8 @@ describe("cache configuration", () => {
 			{ fetchFn },
 		);
 
-		await expect(session.getPlanning(requestedWindow)).resolves.toEqual([
+		const planning = await session.getPlanning(requestedWindow);
+		expect(planning).toMatchObject([
 			{
 				id: "event-inside",
 				title: "Inside",
@@ -339,6 +344,7 @@ describe("cache configuration", () => {
 				type: "Cours",
 			},
 		]);
+		expect(typeof planning[0]?.getDetails).toBe("function");
 
 		expect(capturedPlanningRequests).toHaveLength(1);
 
@@ -355,6 +361,140 @@ describe("cache configuration", () => {
 		);
 		expect(planningRequest.get("form:date_input")).toBe("01/01/2025");
 		expect(planningRequest.get("form:week")).toBe("01-2025");
+	});
+
+	test("AurionPlanningEvent.getDetails sends the PrimeFaces eventSelect request and caches details", async () => {
+		const cacheStore = new InMemoryAurionCache();
+		const detailBody = await Bun.file("response-getEventDetails.xml").text();
+		const capturedDetailRequests: URLSearchParams[] = [];
+		const capturedDetailHeaders: Headers[] = [];
+		let planningPostCount = 0;
+		let detailPostCount = 0;
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly",
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-root"><input name="form:idInit" value="root-id">',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "GET") {
+				return new Response(
+					"<a onclick=\"PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'planning-menu'})\"><span class=\"ui-menuitem-icon ui-icon fa fa-calendar-alt\"></span><span class=\"ui-menuitem-text\">Mon Planning</span></a>",
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				return new Response("sidebar-ok", { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
+				return new Response(
+					[
+						'<input name="javax.faces.ViewState" value="view-planning">',
+						'<input name="form:date_input" value="22/06/2026">',
+						'<input name="form:week" value="26-2026">',
+						'<script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>',
+					].join(""),
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				const postData = new URLSearchParams(init?.body?.toString() ?? "");
+				if (postData.get("javax.faces.partial.event") === "eventSelect") {
+					detailPostCount += 1;
+					capturedDetailRequests.push(postData);
+					capturedDetailHeaders.push(new Headers(init?.headers));
+
+					return new Response(detailBody, {
+						status: 200,
+						headers: {
+							"Content-Type": "text/xml;charset=UTF-8",
+						},
+					});
+				}
+
+				planningPostCount += 1;
+				return new Response(
+					'[{"id":"70063950","title":"Projet Electronique","start":"2026-06-15T13:30:00.000Z","end":"2026-06-15T17:55:00.000Z","allDay":false,"editable":false,"className":"Projet"}]',
+					{ status: 200 },
+				);
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(cacheStore, { fetchFn });
+		const planning = await session.getPlanning({
+			start: new Date("2026-06-15T12:00:00.000Z"),
+			end: new Date("2026-06-15T18:00:00.000Z"),
+		});
+		const event = planning[0];
+		if (!event) {
+			throw new Error("Expected one planning event");
+		}
+
+		const details = await event.getDetails();
+		const cachedDetails = await event.getDetails();
+
+		expect(planningPostCount).toBe(1);
+		expect(detailPostCount).toBe(1);
+		expect(details).toBe(cachedDetails);
+		expect(details.eventId).toBe("70063950");
+		expect(details.subject).toBe("Pédagogique");
+		expect(details.resources).toEqual([
+			{
+				code: "ROOM_A1",
+				name: "ROOM A1 - LAB",
+			},
+		]);
+
+		expect(capturedDetailRequests).toHaveLength(1);
+		const detailRequest = capturedDetailRequests[0];
+		if (!detailRequest) {
+			throw new Error("Expected one captured event detail request");
+		}
+
+		expect(detailRequest.get("javax.faces.partial.ajax")).toBe("true");
+		expect(detailRequest.get("javax.faces.source")).toBe("form:planning");
+		expect(detailRequest.get("javax.faces.partial.execute")).toBe("form:planning");
+		expect(detailRequest.get("javax.faces.partial.render")).toBe(
+			"form:modaleDetail form:confirmerSuppression",
+		);
+		expect(detailRequest.get("javax.faces.behavior.event")).toBe("eventSelect");
+		expect(detailRequest.get("javax.faces.partial.event")).toBe("eventSelect");
+		expect(detailRequest.get("form:planning_selectedEventId")).toBe("70063950");
+		expect(detailRequest.get("form:largeurDivCenter")).toBe("1605");
+		expect(detailRequest.get("form:idInit")).toBe("root-id");
+		expect(detailRequest.get("form:date_input")).toBe("22/06/2026");
+		expect(detailRequest.get("form:week")).toBe("26-2026");
+		expect(detailRequest.get("form:planning_view")).toBe("agendaWeek");
+		expect(detailRequest.get("form:offsetFuseauNavigateur")).toBe("-7200000");
+		expect(detailRequest.get("form:onglets_activeIndex")).toBe("0");
+		expect(detailRequest.get("form:onglets_scrollState")).toBe("0");
+		expect(detailRequest.get("javax.faces.ViewState")).toBe("view-planning");
+
+		const detailHeaders = capturedDetailHeaders[0];
+		if (!detailHeaders) {
+			throw new Error("Expected captured event detail headers");
+		}
+		expect(detailHeaders.get("Faces-Request")).toBe("partial/ajax");
+		expect(detailHeaders.get("X-Requested-With")).toBe("XMLHttpRequest");
+		expect(detailHeaders.get("Accept")).toBe("application/xml, text/xml, */*; q=0.01");
 	});
 
 	test("AurionSession reuses resolved navigation nodes between uncached planning requests", async () => {
@@ -615,10 +755,12 @@ describe("cache configuration", () => {
 
 		await expect(firstSession.getPlanning(planningWindow)).resolves.toHaveLength(1);
 		await expect(secondSession.getPlanning(planningWindow)).resolves.toHaveLength(1);
-		await expect(firstSession.getPlanning({
-			start: new Date("2025-01-01T12:00:00.000Z"),
-			end: new Date("2025-01-01T13:00:00.000Z"),
-		})).resolves.toHaveLength(1);
+		await expect(
+			firstSession.getPlanning({
+				start: new Date("2025-01-01T12:00:00.000Z"),
+				end: new Date("2025-01-01T13:00:00.000Z"),
+			}),
+		).resolves.toHaveLength(1);
 
 		expect(countsBySession.get("session-a")).toEqual({
 			root: 1,
@@ -680,9 +822,12 @@ describe("cache configuration", () => {
 				const body = init?.body?.toString() ?? "";
 				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU")) {
 					counts.absencesMainMenuPost += 1;
-					return new Response("<update>form:sidebar_menuid:'absences-menu' Mes absences</span></update>", {
-						status: 200,
-					});
+					return new Response(
+						"<update>form:sidebar_menuid:'absences-menu' Mes absences</span></update>",
+						{
+							status: 200,
+						},
+					);
 				}
 
 				counts.planningMainMenuPost += 1;
@@ -731,7 +876,7 @@ describe("cache configuration", () => {
 			}),
 		).resolves.toHaveLength(1);
 
-			expect(counts).toEqual({
+		expect(counts).toEqual({
 			root: 1,
 			planningMainMenuGet: 1,
 			planningMainMenuPost: 2,

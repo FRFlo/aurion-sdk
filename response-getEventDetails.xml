@@ -1,0 +1,577 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<partial-response id="j_id1">
+  <changes>
+    <update id="form:messages"><![CDATA[<div id="form:messages" class="ui-messages ui-widget" aria-live="polite"></div>]]></update>
+    <update id="form:modaleDetail"><![CDATA[<div id="form:modaleDetail"
+        class="ui-dialog ui-widget ui-widget-content ui-corner-all ui-shadow ui-hidden-container modale-detail">
+        <div class="ui-dialog-titlebar ui-widget-header ui-helper-clearfix ui-corner-top"><span
+                        id="form:modaleDetail_title" class="ui-dialog-title"></span><a href="#"
+                        class="ui-dialog-titlebar-icon ui-dialog-titlebar-close ui-corner-all" aria-label="Close"><span
+                                class="ui-icon ui-icon-closethick"></span></a></div>
+        <div class="ui-dialog-content ui-widget-content">
+                <div id="form:j_idt134" class="ui-messages ui-widget" aria-live="polite"></div>
+                <div id="form:boutonsAbsence">
+                        <p>
+                        </p>
+                        <div style="float: right"></div>
+                </div>
+                <table id="form:j_idt144" class="ui-panelgrid ui-widget panelgrid-debut-fin" role="grid">
+                        <tbody>
+                                <tr class="ui-widget-content" role="row">
+                                        <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span
+                                                                class="label">Du</span></label></td>
+                                        <td role="gridcell" class="ui-panelgrid-cell">lundi 15 juin 2026</td>
+                                        <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span
+                                                                class="label">à</span></label></td>
+                                        <td role="gridcell" class="ui-panelgrid-cell">13:30</td>
+                                </tr>
+                                <tr class="ui-widget-content" role="row">
+                                        <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span
+                                                                class="label">Au</span></label></td>
+                                        <td role="gridcell" class="ui-panelgrid-cell">lundi 15 juin 2026</td>
+                                        <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span
+                                                                class="label">à</span></label></td>
+                                        <td role="gridcell" class="ui-panelgrid-cell">17:55</td>
+                                </tr>
+                        </tbody>
+                </table>
+                <div id="form:j_idt153" class="ui-panelgrid ui-widget panelgrid-info-epreuve">
+                        <div id="form:j_idt153_content"
+                                class="ui-panelgrid-content ui-widget-content ui-grid ui-grid-responsive">
+                                <div class="ui-grid-row">
+                                        <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span
+                                                                class="label">Statut</span></label></div>
+                                        <div class="ui-panelgrid-cell ui-grid-col-6">Planifié</div>
+                                </div>
+                                <div class="ui-grid-row">
+                                        <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span
+                                                                class="label">Matière</span></label></div>
+                                        <div class="ui-panelgrid-cell ui-grid-col-6">Pédagogique</div>
+                                </div>
+                                <div class="ui-grid-row">
+                                        <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span
+                                                                class="label">Type d'enseignement</span></label></div>
+                                        <div class="ui-panelgrid-cell ui-grid-col-6">Projet</div>
+                                </div>
+                                <div class="ui-grid-row">
+                                        <div class="ui-panelgrid-cell ui-grid-col-6"><label class="ev_libelle"><span
+                                                                class="ev_libelle">Description</span></label></div>
+                                        <div class="ui-panelgrid-cell ui-grid-col-6"></div>
+                                </div>
+                                <div class="ui-grid-row">
+                                        <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span
+                                                                class="label">Est une épreuve</span></label></div>
+                                        <div class="ui-panelgrid-cell ui-grid-col-6">Non</div>
+                                </div>
+                        </div>
+                </div>
+                <div id="form:onglets"
+                        class="ui-tabs ui-widget ui-widget-content ui-corner-all ui-hidden-container ui-tabs-top ui-tabs-scrollable onglets"
+                        data-widget="widget_form_onglets">
+                        <div class="ui-tabs-navscroller"><a
+                                        class="ui-tabs-navscroller-btn ui-tabs-navscroller-btn-left ui-state-default ui-corner-right"><span
+                                                class="ui-icon ui-icon-carat-1-w"></span></a><a
+                                        class="ui-tabs-navscroller-btn ui-tabs-navscroller-btn-right ui-state-default ui-corner-left"><span
+                                                class="ui-icon ui-icon-carat-1-e"></span></a>
+                                <ul class="ui-tabs-nav ui-helper-reset ui-helper-clearfix ui-widget-header ui-corner-all"
+                                        role="tablist">
+                                        <li class="ui-state-default ui-tabs-selected ui-state-active ui-corner-top"
+                                                role="tab" aria-expanded="true" aria-selected="true"><a
+                                                        href="#form:onglets:j_idt164" tabindex="-1">Ressources</a></li>
+                                        <li class="ui-state-default ui-corner-top" role="tab" aria-expanded="false"
+                                                aria-selected="false"><a href="#form:onglets:j_idt172"
+                                                        tabindex="-1">Intervenants</a></li>
+                                        <li class="ui-state-default ui-corner-top" role="tab" aria-expanded="false"
+                                                aria-selected="false"><a href="#form:onglets:j_idt180"
+                                                        tabindex="-1">Apprenants (31)</a></li>
+                                        <li class="ui-state-default ui-corner-top" role="tab" aria-expanded="false"
+                                                aria-selected="false"><a href="#form:onglets:j_idt211"
+                                                        tabindex="-1">Groupes</a></li>
+                                        <li class="ui-state-default ui-corner-top" role="tab" aria-expanded="false"
+                                                aria-selected="false"><a href="#form:onglets:j_idt219"
+                                                        tabindex="-1">Cours</a></li>
+                                </ul>
+                        </div>
+                        <div class="ui-tabs-panels">
+                                <div id="form:onglets:j_idt164" class="ui-tabs-panel ui-widget-content ui-corner-bottom"
+                                        role="tabpanel" aria-hidden="false">
+                                        <div id="form:onglets:j_idt165" class="ui-datatable ui-widget">
+                                                <div class="ui-datatable-tablewrapper">
+                                                        <table role="grid">
+                                                                <thead id="form:onglets:j_idt165_head">
+                                                                        <tr role="row">
+                                                                                <th id="form:onglets:j_idt165:j_idt166"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Code" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Code</span>
+                                                                                </th>
+                                                                                <th id="form:onglets:j_idt165:j_idt169"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Libellé"
+                                                                                        scope="col"><span
+                                                                                                class="ui-column-title">Libellé</span>
+                                                                                </th>
+                                                                        </tr>
+                                                                </thead>
+                                                                <tbody id="form:onglets:j_idt165_data"
+                                                                        class="ui-datatable-data ui-widget-content">
+                                                                        <tr data-ri="0"
+                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                role="row">
+                                                                                <td role="gridcell">ROOM_A1</td>
+                                                                                <td role="gridcell">ROOM A1 - LAB
+                                                                                </td>
+                                                                        </tr>
+                                                                </tbody>
+                                                        </table>
+                                                </div>
+                                        </div>
+                                        <script id="form:onglets:j_idt165_s"
+                                                type="text/javascript">$(function () { PrimeFaces.cw("DataTable", "widget_form_onglets_j_idt165", { id: "form:onglets:j_idt165" }); });</script>
+                                </div>
+                                <div id="form:onglets:j_idt172"
+                                        class="ui-tabs-panel ui-widget-content ui-corner-bottom ui-helper-hidden"
+                                        role="tabpanel" aria-hidden="true">
+                                        <div id="form:onglets:j_idt173" class="ui-datatable ui-widget">
+                                                <div class="ui-datatable-tablewrapper">
+                                                        <table role="grid">
+                                                                <thead id="form:onglets:j_idt173_head">
+                                                                        <tr role="row">
+                                                                                <th id="form:onglets:j_idt173:j_idt174"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Nom" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Nom</span>
+                                                                                </th>
+                                                                                <th id="form:onglets:j_idt173:j_idt177"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Prénom" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Prénom</span>
+                                                                                </th>
+                                                                        </tr>
+                                                                </thead>
+                                                                <tbody id="form:onglets:j_idt173_data"
+                                                                        class="ui-datatable-data ui-widget-content">
+                                                                        <tr data-ri="0"
+                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                role="row">
+                                                                                <td role="gridcell">DOE</td>
+                                                                                <td role="gridcell">Jane</td>
+                                                                        </tr>
+                                                                </tbody>
+                                                        </table>
+                                                </div>
+                                        </div>
+                                        <script id="form:onglets:j_idt173_s"
+                                                type="text/javascript">$(function () { PrimeFaces.cw("DataTable", "widget_form_onglets_j_idt173", { id: "form:onglets:j_idt173" }); });</script>
+                                </div>
+                                <div id="form:onglets:j_idt180"
+                                        class="ui-tabs-panel ui-widget-content ui-corner-bottom ui-helper-hidden"
+                                        role="tabpanel" aria-hidden="true">
+                                        <div id="form:onglets:divOngletApprenant">
+                                                <div id="form:onglets:j_idt181">
+                                                        <div class="cacherImpression" style="position: relative"></div>
+
+                                                        <p></p>
+                                                        <div id="form:onglets:apprenantsTable"
+                                                                class="ui-datatable ui-widget datatable-apprenant ui-datatable-reflow">
+                                                                <div
+                                                                        class="ui-datatable-header ui-widget-header ui-corner-top">
+
+                                                                        <div style="clear: both"></div>
+                                                                </div>
+                                                                <div class="ui-datatable-tablewrapper">
+                                                                        <table role="grid">
+                                                                                <thead
+                                                                                        id="form:onglets:apprenantsTable_head">
+                                                                                        <tr role="row">
+                                                                                                <th id="form:onglets:apprenantsTable:j_idt193"
+                                                                                                        class="ui-state-default ui-static-column"
+                                                                                                        role="columnheader"
+                                                                                                        aria-label="Nom"
+                                                                                                        scope="col">
+                                                                                                        <span
+                                                                                                                class="ui-column-title">Nom</span>
+                                                                                                </th>
+                                                                                                <th id="form:onglets:apprenantsTable:j_idt196"
+                                                                                                        class="ui-state-default ui-static-column"
+                                                                                                        role="columnheader"
+                                                                                                        aria-label="Prénom"
+                                                                                                        scope="col">
+                                                                                                        <span
+                                                                                                                class="ui-column-title">Prénom</span>
+                                                                                                </th>
+                                                                                        </tr>
+                                                                                </thead>
+                                                                                <tbody id="form:onglets:apprenantsTable_data"
+                                                                                        class="ui-datatable-data ui-widget-content">
+                                                                                        <tr data-ri="0"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			HODKIEWICZ</td>
+																		<td role="gridcell">
+																			Kadin</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="1"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			TOY</td>
+																		<td role="gridcell">
+																			Julia</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="2"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			DUBUQUE</td>
+																		<td role="gridcell">
+																			Louise</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="3"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			BINS</td>
+																		<td role="gridcell">
+																			Lana</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="4"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			DUBUQUE</td>
+																		<td role="gridcell">
+																			Braden</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="5"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			BECHTELAR</td>
+																		<td role="gridcell">
+																			Krystina</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="6"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			HALEY</td>
+																		<td role="gridcell">
+																			Faye</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="7"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			BARTON</td>
+																		<td role="gridcell">
+																			Adan</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="8"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			FLATLEY</td>
+																		<td role="gridcell">
+																			Jenny</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="9"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			BOGISICH</td>
+																		<td role="gridcell">
+																			Cordell</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="10"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			RONALDO</td>
+																		<td role="gridcell">
+																			Christiano</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="11"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			KUHN</td>
+																		<td role="gridcell">
+																			Pete</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="12"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			WIEGAND</td>
+																		<td role="gridcell">
+																			Georgette</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="13"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			MARVIN-ROHAN</td>
+																		<td role="gridcell">
+																			Brennan</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="14"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			WELCH</td>
+																		<td role="gridcell">
+																			Donald</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="15"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			MANTE</td>
+																		<td role="gridcell">
+																			Drew</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="16"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			KASSULKE</td>
+																		<td role="gridcell">
+																			Garry</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="17"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			HICKLE</td>
+																		<td role="gridcell">
+																			Rocio</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="18"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			KOELPIN</td>
+																		<td role="gridcell">
+																			Arthur</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="19"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			NADER</td>
+																		<td role="gridcell">
+																			Kamren</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="20"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			MILLS</td>
+																		<td role="gridcell">
+																			Humberto</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="21"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			SMITHAM</td>
+																		<td role="gridcell">
+																			Alessandra</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="22"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			BROWN</td>
+																		<td role="gridcell">
+																			Justen</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="23"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			KOCH</td>
+																		<td role="gridcell">
+																			Hilma</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="24"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			CARTWRIGHT</td>
+																		<td role="gridcell">
+																			Darren</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="25"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			YOST</td>
+																		<td role="gridcell">
+																			Brenda</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="26"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			CROOKS</td>
+																		<td role="gridcell">
+																			Ima</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="27"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			WALSH</td>
+																		<td role="gridcell">
+																			Tomas</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="28"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			SCHAMBERGER</td>
+																		<td role="gridcell">
+																			Virgie</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="29"
+                                                                                                class="ui-widget-content ui-datatable-odd"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			HERMAN</td>
+																		<td role="gridcell">
+																			Alice</td>
+                                                                                        </tr>
+                                                                                        <tr data-ri="30"
+                                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                                role="row">
+                                                                                                <td role="gridcell">
+																			RUSSEL</td>
+																		<td role="gridcell">
+																			Shari</td>
+                                                                                        </tr>
+                                                                                </tbody>
+                                                                        </table>
+                                                                </div>
+                                                        </div>
+                                                        <script id="form:onglets:apprenantsTable_s"
+                                                                type="text/javascript">$(function () { PrimeFaces.cw("DataTable", "widget_form_onglets_apprenantsTable", { id: "form:onglets:apprenantsTable", reflow: true }); });</script>
+                                                </div>
+                                        </div>
+                                </div>
+                                <div id="form:onglets:j_idt211"
+                                        class="ui-tabs-panel ui-widget-content ui-corner-bottom ui-helper-hidden"
+                                        role="tabpanel" aria-hidden="true">
+                                        <div id="form:onglets:j_idt212" class="ui-datatable ui-widget">
+                                                <div class="ui-datatable-tablewrapper">
+                                                        <table role="grid">
+                                                                <thead id="form:onglets:j_idt212_head">
+                                                                        <tr role="row">
+                                                                                <th id="form:onglets:j_idt212:j_idt213"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Code" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Code</span>
+                                                                                </th>
+                                                                                <th id="form:onglets:j_idt212:j_idt216"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Libellé"
+                                                                                        scope="col"><span
+                                                                                                class="ui-column-title">Libellé</span>
+                                                                                </th>
+                                                                        </tr>
+                                                                </thead>
+                                                                <tbody id="form:onglets:j_idt212_data"
+                                                                        class="ui-datatable-data ui-widget-content">
+                                                                        <tr data-ri="0"
+                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                role="row">
+                                                                                <td role="gridcell">YEAR3_CS</td>
+                                                                                <td role="gridcell">Computer Science Year 3
+                                                                                </td>
+                                                                        </tr>
+                                                                </tbody>
+                                                        </table>
+                                                </div>
+                                        </div>
+                                        <script id="form:onglets:j_idt212_s"
+                                                type="text/javascript">$(function () { PrimeFaces.cw("DataTable", "widget_form_onglets_j_idt212", { id: "form:onglets:j_idt212" }); });</script>
+                                </div>
+                                <div id="form:onglets:j_idt219"
+                                        class="ui-tabs-panel ui-widget-content ui-corner-bottom ui-helper-hidden"
+                                        role="tabpanel" aria-hidden="true">
+                                        <div id="form:onglets:j_idt220" class="ui-datatable ui-widget">
+                                                <div class="ui-datatable-tablewrapper">
+                                                        <table role="grid">
+                                                                <thead id="form:onglets:j_idt220_head">
+                                                                        <tr role="row">
+                                                                                <th id="form:onglets:j_idt220:j_idt221"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Code" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Code</span>
+                                                                                </th>
+                                                                                <th id="form:onglets:j_idt220:j_idt224"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Cours" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Cours</span>
+                                                                                </th>
+                                                                                <th id="form:onglets:j_idt220:j_idt227"
+                                                                                        class="ui-state-default"
+                                                                                        role="columnheader"
+                                                                                        aria-label="Module" scope="col">
+                                                                                        <span
+                                                                                                class="ui-column-title">Module</span>
+                                                                                </th>
+                                                                        </tr>
+                                                                </thead>
+                                                                <tbody id="form:onglets:j_idt220_data"
+                                                                        class="ui-datatable-data ui-widget-content">
+                                                                        <tr data-ri="0"
+                                                                                class="ui-widget-content ui-datatable-even"
+                                                                                role="row">
+                                                                                <td role="gridcell">
+                                                                                        YEAR3_CS_ELEC_PROJ</td>
+                                                                                <td role="gridcell">Software Project
+                                                                                </td>
+                                                                                <td role="gridcell">Unité d'Enseignement
+                                                                                        Electronique, Signaux et
+                                                                                        Systèmes</td>
+                                                                        </tr>
+                                                                </tbody>
+                                                        </table>
+                                                </div>
+                                        </div>
+                                        <script id="form:onglets:j_idt220_s"
+                                                type="text/javascript">$(function () { PrimeFaces.cw("DataTable", "widget_form_onglets_j_idt220", { id: "form:onglets:j_idt220" }); });</script>
+                                </div>
+                        </div><input type="hidden" id="form:onglets_activeIndex" name="form:onglets_activeIndex"
+                                value="0" autocomplete="off" /><input type="hidden" id="form:onglets_scrollState"
+                                name="form:onglets_scrollState" value="0" autocomplete="off" />
+                </div>
+                <script id="form:onglets_s"
+                        type="text/javascript">PrimeFaces.cw("TabView", "widget_form_onglets", { id: "form:onglets", effectDuration: "normal", scrollable: true });</script>
+        </div>
+</div>
+<script id="form:modaleDetail_s"
+        type="text/javascript">$(function () { PrimeFaces.cw("Dialog", "modaleDetail", { id: "form:modaleDetail", modal: true, width: "95vw", height: "80vh", closeOnEscape: true }); });</script>]]></update>
+    <update id="form:j_idt235"><![CDATA[<span id="form:j_idt235"></span>
+<script id="form:j_idt235_s"
+        type="text/javascript">$(function () { PrimeFaces.cw('Growl', 'widget_form_j_idt235', { id: 'form:j_idt235', sticky: true, life: 6000, escape: true, msgs: [] }); });</script>]]></update>
+    <update id="j_id1:javax.faces.ViewState:0"><![CDATA[-3983418810573656851:2327852886025817017]]></update>
+  </changes>
+</partial-response>
