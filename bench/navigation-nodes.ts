@@ -176,7 +176,9 @@ function countRequest(
 	url: string,
 	method: string,
 ): RequestTimingBucket {
-	const pathname = url.startsWith(baseUrl) ? url.slice(baseUrl.length) || "/" : new URL(url).pathname;
+	const pathname = url.startsWith(baseUrl)
+		? url.slice(baseUrl.length) || "/"
+		: new URL(url).pathname;
 
 	if (pathname === "/login" && method === "POST") {
 		counters.login += 1;
@@ -272,23 +274,33 @@ function cloneTimings(timings: RequestTimings): RequestTimings {
 async function runColdTreeBenchmark(config: BenchmarkConfig): Promise<BenchmarkResult> {
 	const instrumented = createInstrumentedFetch(config.baseUrl);
 
-	return measure("real Aurion cold tree rebuilt every call", instrumented.counters, instrumented.timings, async () => {
-		for (let index = 0; index < config.iterations; index += 1) {
-			const session = createSession(config, instrumented.fetchFn);
-			await session.getPlanning(config.window);
-		}
-	});
+	return measure(
+		"real Aurion cold tree rebuilt every call",
+		instrumented.counters,
+		instrumented.timings,
+		async () => {
+			for (let index = 0; index < config.iterations; index += 1) {
+				const session = createSession(config, instrumented.fetchFn);
+				await session.getPlanning(config.window);
+			}
+		},
+	);
 }
 
 async function runWarmTreeBenchmark(config: BenchmarkConfig): Promise<BenchmarkResult> {
 	const instrumented = createInstrumentedFetch(config.baseUrl);
 	const session = createSession(config, instrumented.fetchFn);
 
-	return measure("real Aurion warm parent-child nodes reused", instrumented.counters, instrumented.timings, async () => {
-		for (let index = 0; index < config.iterations; index += 1) {
-			await session.getPlanning(config.window);
-		}
-	});
+	return measure(
+		"real Aurion warm parent-child nodes reused",
+		instrumented.counters,
+		instrumented.timings,
+		async () => {
+			for (let index = 0; index < config.iterations; index += 1) {
+				await session.getPlanning(config.window);
+			}
+		},
+	);
 }
 
 async function assertNoCrossSessionCollision(config: BenchmarkConfig): Promise<void> {
@@ -357,10 +369,15 @@ function printResult(config: BenchmarkConfig, cold: BenchmarkResult, warm: Bench
 	console.log(`Measured runtime delta on real Aurion: ${formatPercent(durationReduction)}.`);
 	console.log("Per-request timing buckets (ms):");
 	console.table(createTimingRows(cold, warm));
-	console.log("Collision check: passed; independent real sessions kept independent navigation trees.");
+	console.log(
+		"Collision check: passed; independent real sessions kept independent navigation trees.",
+	);
 }
 
-function createTimingRows(cold: BenchmarkResult, warm: BenchmarkResult): Array<Record<string, string | number>> {
+function createTimingRows(
+	cold: BenchmarkResult,
+	warm: BenchmarkResult,
+): Array<Record<string, string | number>> {
 	const buckets: RequestTimingBucket[] = [
 		"login",
 		"root",
