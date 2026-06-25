@@ -1,147 +1,6 @@
 import type { AurionPlanningEvent, AurionPlanningEventDetails } from "../types";
 
-import {
-	parseDateOrThrow,
-	throwParsingError,
-	extractElementBlocks,
-	stripTags,
-	normalizeWhitespace,
-} from "./shared";
-
-function escapeRegExp(input: string): string {
-	return input.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function normalizeHeaderText(input: string): string {
-	return input.normalize("NFD").replaceAll(/\p{M}/gu, "").toLowerCase();
-}
-
-function extractTabPanelId(html: string, tabLabel: string): string | null {
-	const navMatch = html.match(/<ul[^>]*class="[^"]*\bui-tabs-nav\b[^"]*"[^>]*>([\s\S]*?)<\/ul>/i);
-	if (!navMatch?.[1]) {
-		return null;
-	}
-
-	for (const link of navMatch[1].matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
-		const href = link[1] ?? "";
-		const label = normalizeWhitespace(stripTags(link[2] ?? ""));
-		if (
-			!href.startsWith("#") ||
-			!normalizeHeaderText(label).startsWith(normalizeHeaderText(tabLabel))
-		) {
-			continue;
-		}
-
-		return href.slice(1);
-	}
-
-	return null;
-}
-
-function extractElementBlockById(body: string, tagName: string, id: string): string | null {
-	const openTagPattern = new RegExp(`<${tagName}\\b[^>]*\\bid="${escapeRegExp(id)}"[^>]*>`, "i");
-	const openTagMatch = openTagPattern.exec(body);
-	if (!openTagMatch) {
-		return null;
-	}
-
-	const startIndex = openTagMatch.index + openTagMatch[0].length;
-
-	let depth = 1;
-	let cursor = startIndex;
-
-	while (depth > 0) {
-		const remainder = body.slice(cursor);
-		const nextOpen = remainder.match(new RegExp(`<${tagName}\\b[^>]*>`, "i"));
-		const nextClose = remainder.match(new RegExp(`</${tagName}>`, "i"));
-		if (!nextClose || nextClose.index === undefined) {
-			return null;
-		}
-		const closeIndex = nextClose.index;
-
-		if (nextOpen?.index !== undefined && nextOpen.index < closeIndex) {
-			depth += 1;
-			cursor += nextOpen.index + nextOpen[0].length;
-			continue;
-		}
-
-		depth -= 1;
-		cursor += closeIndex + nextClose[0].length;
-		if (depth === 0) {
-			return body.slice(openTagMatch.index, cursor);
-		}
-	}
-
-	return null;
-}
-
-function frenchMonthToIndex(monthText: string): number | null {
-	const normalized = normalizeWhitespace(monthText).toLowerCase();
-	const aliases: Record<string, number> = {
-		janvier: 0,
-		fevrier: 1,
-		février: 1,
-		fvrier: 1,
-		mars: 2,
-		avril: 3,
-		mai: 4,
-		juin: 5,
-		juillet: 6,
-		aout: 7,
-		août: 7,
-		septembre: 8,
-		octobre: 9,
-		novembre: 10,
-		decembre: 11,
-		décembre: 11,
-		dcembre: 11,
-	};
-
-	return aliases[normalized] ?? null;
-}
-
-function parseFrenchDateText(dateText: string, timeText: string): Date {
-	const normalizedDateText = normalizeWhitespace(dateText)
-		.toLowerCase()
-		.replace(/^(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+/i, "");
-	const normalizedTimeText = normalizeWhitespace(timeText);
-	const dateMatch = normalizedDateText.match(/^(\d{1,2})\s+(.+?)\s+(\d{4})$/i);
-	if (!dateMatch?.[1] || !dateMatch[2] || !dateMatch[3]) {
-		throw new Error(`Invalid French date text: ${dateText} ${timeText}`);
-	}
-
-	const day = Number.parseInt(dateMatch[1], 10);
-	const month = frenchMonthToIndex(dateMatch[2]);
-	const year = Number.parseInt(dateMatch[3], 10);
-	const timeMatch = normalizedTimeText.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-	if (
-		Number.isNaN(day) ||
-		month === null ||
-		Number.isNaN(year) ||
-		!timeMatch?.[1] ||
-		!timeMatch[2]
-	) {
-		throw new Error(`Invalid French date text: ${dateText} ${timeText}`);
-	}
-
-	const hours = Number.parseInt(timeMatch[1], 10);
-	const minutes = Number.parseInt(timeMatch[2], 10);
-	const seconds = timeMatch[3] ? Number.parseInt(timeMatch[3], 10) : 0;
-	const date = new Date(year, month, day, hours, minutes, seconds, 0);
-
-	if (
-		date.getFullYear() !== year ||
-		date.getMonth() !== month ||
-		date.getDate() !== day ||
-		date.getHours() !== hours ||
-		date.getMinutes() !== minutes ||
-		date.getSeconds() !== seconds
-	) {
-		throw new Error(`Invalid French date text: ${dateText} ${timeText}`);
-	}
-
-	return date;
-}
+import { decodeHtmlEntities, normalizeText, parseDateOrThrow, throwParsingError } from "./shared";
 
 /**
  * Extrait l'identifiant du widget agenda PrimeFaces de la page Planning.
@@ -183,186 +42,6 @@ export function parseSidebarMenuIdForMonPlanning(body: string): string {
 }
 
 /**
- * Parse le bloc HTML de détail d'un événement de planning et valide sa structure.
- *
- * @param body Réponse JSF contenant la modale de détail de l'événement.
- * @param eventId Identifiant de l'événement planning à rattacher au résultat.
- * @returns Les détails complets de l'événement de planning convertis en structure normalisée.
- * @throws {AurionError} Si le bloc de détail est absent, invalide ou incomplet.
- */
-export function parseEventDetails(body: string, eventId: string): AurionPlanningEventDetails {
-	const updateMatch = body.match(
-		/<update id="form:modaleDetail"><!\[CDATA\[([\s\S]*?)\]\]><\/update>/,
-	);
-	if (!updateMatch?.[1]) {
-		throwParsingError(body, "parseEventDetails", "Modale detail update block not found");
-	}
-
-	const html = updateMatch[1];
-	const tabsNavIndex = html.search(/<ul[^>]*class="[^"]*\bui-tabs-nav\b[^"]*"[^>]*>/i);
-	const fieldsHtml = tabsNavIndex === -1 ? html : html.slice(0, tabsNavIndex);
-
-	// Extract basic info
-	const extractField = (label: string): string | null => {
-		const labelPattern = escapeRegExp(label);
-		const divMatch = fieldsHtml.match(
-			new RegExp(
-				`<div[^>]*class="ui-grid-row"[\\s\\S]*?<label[^>]*>[\\s\\S]*?(?:<span[^>]*>)?${labelPattern}(?:</span>)?[\\s\\S]*?</label>[\\s\\S]*?<div[^>]*class="ui-panelgrid-cell ui-grid-col-6">([\\s\\S]*?)</div>`,
-				"i",
-			),
-		);
-		if (divMatch?.[1]) {
-			const value = normalizeWhitespace(stripTags(divMatch[1]));
-			return value || null;
-		}
-
-		const tdMatch = fieldsHtml.match(
-			new RegExp(
-				`<tr[^>]*role="row"[\\s\\S]*?<label[^>]*>[\\s\\S]*?(?:<span[^>]*>)?${labelPattern}(?:</span>)?[\\s\\S]*?</label>[\\s\\S]*?</td>\\s*<td[^>]*>([\\s\\S]*?)</td>`,
-				"i",
-			),
-		);
-		if (tdMatch?.[1]) {
-			const value = normalizeWhitespace(stripTags(tdMatch[1]));
-			return value || null;
-		}
-		return null;
-	};
-
-	const extractDateField = (label: string): Date | null => {
-		const labelPattern = escapeRegExp(label);
-		const rows = extractElementBlocks(fieldsHtml, "tr");
-		for (const row of rows) {
-			if (!new RegExp(`(?:<span[^>]*>)?${labelPattern}(?:</span>)?`, "i").test(row)) {
-				continue;
-			}
-
-			const cells = extractElementBlocks(row, "td").map((cell) =>
-				normalizeWhitespace(stripTags(cell)),
-			);
-			if (cells.length < 4 || !cells[1] || !cells[3]) {
-				continue;
-			}
-
-			return parseFrenchDateText(cells[1], cells[3]);
-		}
-
-		return null;
-	};
-
-	const status = extractField("Statut");
-	const subject = extractField("Matière");
-	const teachingType = extractField("Type d'enseignement");
-	const description = extractField("Description");
-	const isExamStr = extractField("Est une épreuve");
-	const isExam = isExamStr?.toLowerCase() === "oui";
-
-	// Extract dates
-	const start = extractDateField("Du");
-	const end = extractDateField("Au");
-
-	if (!start || !end) {
-		throwParsingError(body, "parseEventDetails", "Planning detail dates not found", {
-			startFound: Boolean(start),
-			endFound: Boolean(end),
-		});
-	}
-
-	// Extract datatables
-	const extractTableData = (tabLabel: string, columns: string[]): Record<string, string>[] => {
-		const panelId = extractTabPanelId(html, tabLabel);
-		if (!panelId) {
-			return [];
-		}
-
-		const panelHtml = extractElementBlockById(html, "div", panelId);
-		if (!panelHtml) {
-			return [];
-		}
-
-		const tableMatch = panelHtml.match(/<table\b[^>]*>[\s\S]*?<\/table>/i);
-		if (!tableMatch) return [];
-
-		const table = tableMatch[0];
-		const theadMatch = table.match(/<thead[^>]*>([\s\S]*?)<\/thead>/i);
-		if (!theadMatch || !theadMatch[1]) return [];
-
-		const headers = extractElementBlocks(theadMatch[1], "th").map((th) =>
-			normalizeWhitespace(stripTags(th)),
-		);
-		const normalizedHeaders = headers.map((header) => normalizeHeaderText(header));
-		const normalizedColumns = columns.map((column) => normalizeHeaderText(column));
-
-		// Check if this table has the expected columns
-		const hasAllColumns = normalizedColumns.every((col) =>
-			normalizedHeaders.some((h) => h.includes(col)),
-		);
-		if (hasAllColumns) {
-			const tbodyMatch = table.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i);
-			if (!tbodyMatch || !tbodyMatch[1]) return [];
-
-			const rows = extractElementBlocks(tbodyMatch[1], "tr");
-			const result = [];
-
-			for (const row of rows) {
-				const cells = extractElementBlocks(row, "td").map((td) =>
-					normalizeWhitespace(stripTags(td)),
-				);
-				if (
-					cells.length >= columns.length &&
-					cells[0] &&
-					!cells[0].includes("Aucun enregistrement")
-				) {
-					const rowData: Record<string, string> = {};
-					columns.forEach((col) => {
-						const normalizedColumn = normalizeHeaderText(col);
-						const headerIndex = normalizedHeaders.findIndex((h) => h.includes(normalizedColumn));
-						if (headerIndex !== -1 && cells[headerIndex]) {
-							rowData[col] = cells[headerIndex];
-						}
-					});
-					result.push(rowData);
-				}
-			}
-			return result;
-		}
-		return [];
-	};
-
-	const teachersData = extractTableData("Intervenants", ["Nom", "Prenom"]);
-	const studentsData = extractTableData("Apprenants", ["Nom", "Prenom"]);
-	const groupsData = extractTableData("Groupes", ["Code", "Libelle"]);
-	const coursesData = extractTableData("Cours", ["Code", "Cours", "Module"]);
-	const resourcesData = extractTableData("Ressources", ["Code", "Libelle"]);
-
-	return {
-		eventId,
-		start,
-		end,
-		status,
-		subject,
-		teachingType,
-		description,
-		isExam,
-		teachers: teachersData.map((t) => ({
-			lastName: t["Nom"] ?? "",
-			firstName: t["Prenom"] ?? "",
-		})),
-		students: studentsData.map((s) => ({
-			lastName: s["Nom"] ?? "",
-			firstName: s["Prenom"] ?? "",
-		})),
-		groups: groupsData.map((g) => ({ code: g["Code"] ?? "", name: g["Libelle"] ?? "" })),
-		courses: coursesData.map((c) => ({
-			code: c["Code"] ?? "",
-			course: c["Cours"] ?? "",
-			module: c["Module"] ?? "",
-		})),
-		resources: resourcesData.map((r) => ({ code: r["Code"] ?? "", name: r["Libelle"] ?? "" })),
-	};
-}
-
-/**
  * Parse la charge JSON d'événements du planning et valide sa structure.
  *
  * @param body Réponse JSF contenant le payload JSON du planning.
@@ -370,23 +49,7 @@ export function parseEventDetails(body: string, eventId: string): AurionPlanning
  * @throws {AurionError} Si le payload JSON est absent, invalide ou contient des événements mal formés.
  */
 export function parsePlanningEvents(body: string): Array<Omit<AurionPlanningEvent, "getDetails">> {
-	const payloadMatch =
-		body.match(/(\[\{"id"[\s\S]*?}])/) ?? body.match(/\{\s*"events"\s*:\s*(\[[\s\S]*?])\s*}/);
-	if (!payloadMatch?.[1]) {
-		throwParsingError(body, "parsePlanningEvents", "Planning JSON payload not found");
-	}
-
-	const payload = payloadMatch[1];
-	let parsed: unknown;
-
-	try {
-		parsed = JSON.parse(payload);
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : "Unknown JSON parsing error";
-		throwParsingError(body, "parsePlanningEvents", `Invalid planning JSON payload: ${reason}`, {
-			payloadSnippet: payload.slice(0, 280),
-		});
-	}
+	const { payload, parsed } = parsePlanningEventsPayload(body);
 
 	if (!Array.isArray(parsed)) {
 		throwParsingError(body, "parsePlanningEvents", "Planning payload is not an array", {
@@ -423,6 +86,84 @@ export function parsePlanningEvents(body: string): Array<Omit<AurionPlanningEven
 	});
 }
 
+function parsePlanningEventsPayload(body: string): { payload: string; parsed: unknown } {
+	const trimmedBody = body.trim();
+	const directParsed = parsePlanningJsonCandidate(trimmedBody);
+	if (directParsed !== null) {
+		return directParsed;
+	}
+
+	for (const cdata of body.matchAll(/<!\[CDATA\[([\s\S]*?)]]>/g)) {
+		const candidate = cdata[1]?.trim();
+		if (!candidate?.includes('"events"')) {
+			continue;
+		}
+
+		const parsed = parsePlanningJsonCandidate(candidate);
+		if (parsed !== null) {
+			return parsed;
+		}
+	}
+
+	throwParsingError(body, "parsePlanningEvents", "Planning JSON payload not found");
+}
+
+function parsePlanningJsonCandidate(
+	candidate: string,
+): { payload: string; parsed: unknown } | null {
+	if (!candidate.startsWith("{") && !candidate.startsWith("[")) {
+		return null;
+	}
+
+	let parsed: unknown;
+
+	try {
+		parsed = JSON.parse(candidate);
+	} catch {
+		return null;
+	}
+
+	if (Array.isArray(parsed)) {
+		return { payload: candidate, parsed };
+	}
+
+	if (isRecord(parsed) && Array.isArray(parsed.events)) {
+		return { payload: JSON.stringify(parsed.events), parsed: parsed.events };
+	}
+
+	return null;
+}
+
+/**
+ * Parse la réponse partielle JSF qui contient la modale de détails d'un événement.
+ *
+ * @param body Réponse XML partielle renvoyée par le `eventSelect` PrimeFaces.
+ * @param eventId Identifiant de l'événement sélectionné.
+ * @returns Les détails complets de l'événement extraits de la modale Aurion.
+ * @throws {AurionError} Si la modale ou un champ obligatoire ne peut pas être extrait.
+ */
+export function parseEventDetails(body: string, eventId: string): AurionPlanningEventDetails {
+	const modal = extractPartialUpdate(body, "form:modaleDetail");
+	const start = extractDateField(body, modal, "Du");
+	const end = extractDateField(body, modal, "Au");
+
+	return {
+		eventId,
+		start,
+		end,
+		status: extractField(modal, "Statut"),
+		subject: extractField(modal, "Matière"),
+		teachingType: extractField(modal, "Type d'enseignement"),
+		description: extractField(modal, "Description"),
+		isExam: extractField(modal, "Est une épreuve")?.toLowerCase() === "oui",
+		teachers: parsePeopleTable(modal, "Intervenants"),
+		students: parsePeopleTable(modal, "Apprenants"),
+		groups: parseCodeNameTable(modal, "Groupes"),
+		courses: parseCoursesTable(modal, "Cours"),
+		resources: parseCodeNameTable(modal, "Ressources"),
+	};
+}
+
 interface PlanningEventPayload {
 	id: string;
 	title: string;
@@ -434,21 +175,23 @@ interface PlanningEventPayload {
 }
 
 function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
-	if (!value || typeof value !== "object") {
+	if (!isRecord(value)) {
 		return false;
 	}
 
-	const candidate = value as Record<string, unknown>;
-
 	return (
-		typeof candidate.id === "string" &&
-		typeof candidate.title === "string" &&
-		"start" in candidate &&
-		"end" in candidate &&
-		typeof candidate.allDay === "boolean" &&
-		typeof candidate.editable === "boolean" &&
-		typeof candidate.className === "string"
+		typeof value.id === "string" &&
+		typeof value.title === "string" &&
+		"start" in value &&
+		"end" in value &&
+		typeof value.allDay === "boolean" &&
+		typeof value.editable === "boolean" &&
+		typeof value.className === "string"
 	);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
 }
 
 /**
@@ -476,4 +219,269 @@ export function isPlanningEvent(value: unknown): value is AurionPlanningEvent {
 		typeof candidate.type === "string" &&
 		typeof candidate.getDetails === "function"
 	);
+}
+
+function extractPartialUpdate(body: string, updateId: string): string {
+	const escapedUpdateId = escapeRegExp(updateId);
+	const match = body.match(
+		new RegExp(
+			`<update\\s+id=["']${escapedUpdateId}["']>\\s*<!\\[CDATA\\[([\\s\\S]*?)]]>\\s*</update>`,
+		),
+	);
+
+	if (!match?.[1]) {
+		throwParsingError(body, "parseEventDetails", "Event details modal update not found", {
+			updateId,
+		});
+	}
+
+	return match[1];
+}
+
+function extractField(modal: string, label: string): string | null {
+	const rowMatch = findLabeledValue(modal, label);
+	if (!rowMatch) {
+		return null;
+	}
+
+	return normalizeNullableText(rowMatch);
+}
+
+function extractDateField(body: string, modal: string, label: "Du" | "Au"): Date {
+	const row = findTableRowByLabel(modal, label);
+	if (!row) {
+		throwParsingError(body, "parseEventDetails", `Missing ${label} date row`);
+	}
+
+	const cells = extractCells(row);
+	const date = cells[1];
+	const time = cells[3];
+	if (!date || !time) {
+		throwParsingError(body, "parseEventDetails", `Incomplete ${label} date row`, {
+			cells,
+		});
+	}
+
+	return parseFrenchDateText(body, `${date} ${time}`, label);
+}
+
+function parsePeopleTable(
+	modal: string,
+	tabLabel: string,
+): Array<{ lastName: string; firstName: string }> {
+	return parseTabRows(modal, tabLabel)
+		.map((row) => ({
+			lastName: row.nom ?? "",
+			firstName: row.prenom ?? "",
+		}))
+		.filter((person) => person.lastName !== "" || person.firstName !== "");
+}
+
+function parseCodeNameTable(
+	modal: string,
+	tabLabel: string,
+): Array<{ code: string; name: string }> {
+	return parseTabRows(modal, tabLabel)
+		.map((row) => ({
+			code: row.code ?? "",
+			name: row.libelle ?? "",
+		}))
+		.filter((item) => item.code !== "" || item.name !== "");
+}
+
+function parseCoursesTable(
+	modal: string,
+	tabLabel: string,
+): Array<{ code: string; course: string; module: string }> {
+	return parseTabRows(modal, tabLabel)
+		.map((row) => ({
+			code: row.code ?? "",
+			course: row.cours ?? "",
+			module: row.module ?? "",
+		}))
+		.filter((course) => course.code !== "" || course.course !== "" || course.module !== "");
+}
+
+function parseTabRows(modal: string, tabLabel: string): Array<Record<string, string>> {
+	const panelId = extractTabPanelId(modal, tabLabel);
+	if (!panelId) {
+		return [];
+	}
+
+	const panel = extractElementBlockById(modal, panelId, "div");
+	if (!panel) {
+		return [];
+	}
+
+	const table = extractElementBlock(panel, "table");
+	if (!table) {
+		return [];
+	}
+
+	const headers = Array.from(table.matchAll(/<th\b[\s\S]*?<\/th>/g)).map((match) =>
+		normalizeHeaderText(match[0]),
+	);
+	const bodyMatch = table.match(/<tbody\b[\s\S]*?>([\s\S]*?)<\/tbody>/);
+	if (!bodyMatch?.[1]) {
+		return [];
+	}
+
+	return Array.from(bodyMatch[1].matchAll(/<tr\b[\s\S]*?<\/tr>/g)).map((match) => {
+		const cells = extractCells(match[0]);
+		const row: Record<string, string> = {};
+
+		for (const [index, header] of headers.entries()) {
+			row[header] = cells[index] ?? "";
+		}
+
+		return row;
+	});
+}
+
+function extractTabPanelId(modal: string, tabLabel: string): string | null {
+	const escapedLabel = escapeRegExp(tabLabel);
+	const match = modal.match(
+		new RegExp(
+			`<a\\s+href=["']#([^"']+)["'][^>]*>\\s*${escapedLabel}(?:\\s*\\([^)]*\\))?\\s*</a>`,
+			"i",
+		),
+	);
+
+	return match?.[1] ?? null;
+}
+
+function findLabeledValue(modal: string, label: string): string | null {
+	const escapedLabel = escapeRegExp(label);
+	const match = modal.match(
+		new RegExp(
+			`<div\\s+class=["'][^"']*ui-grid-row[^"']*["'][^>]*>[\\s\\S]*?<span[^>]*>\\s*${escapedLabel}\\s*</span>[\\s\\S]*?</div>\\s*<div\\s+class=["'][^"']*ui-panelgrid-cell[^"']*["'][^>]*>([\\s\\S]*?)</div>`,
+			"i",
+		),
+	);
+
+	return match?.[1] ?? null;
+}
+
+function findTableRowByLabel(modal: string, label: string): string | null {
+	const rows = modal.match(/<tr\b[\s\S]*?<\/tr>/g) ?? [];
+
+	return rows.find((row) => extractCells(row)[0] === label) ?? null;
+}
+
+function extractCells(row: string): string[] {
+	return Array.from(row.matchAll(/<t[dh]\b[\s\S]*?>([\s\S]*?)<\/t[dh]>/g)).map((match) =>
+		normalizeText(match[1] ?? ""),
+	);
+}
+
+function extractElementBlockById(markup: string, id: string, tagName: string): string | null {
+	const escapedId = escapeRegExp(id);
+	const openingTag = markup.match(
+		new RegExp(`<${tagName}\\b[^>]*id=["']${escapedId}["'][^>]*>`, "i"),
+	);
+	if (openingTag?.index === undefined) {
+		return null;
+	}
+
+	return extractElementBlock(markup.slice(openingTag.index), tagName);
+}
+
+function extractElementBlock(markup: string, tagName: string): string | null {
+	const tagPattern = new RegExp(`</?${tagName}\\b[^>]*>`, "gi");
+	let depth = 0;
+	let startIndex: number | null = null;
+
+	for (const match of markup.matchAll(tagPattern)) {
+		const token = match[0];
+		const index = match.index ?? 0;
+		if (!token.startsWith("</")) {
+			if (depth === 0) {
+				startIndex = index;
+			}
+			depth += 1;
+		} else {
+			depth -= 1;
+			if (depth === 0 && startIndex !== null) {
+				return markup.slice(startIndex, index + token.length);
+			}
+		}
+	}
+
+	return null;
+}
+
+function parseFrenchDateText(body: string, value: string, field: string): Date {
+	const normalized = normalizeText(value).toLowerCase();
+	const match = normalized.match(
+		/(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+(\d{1,2})\s+([a-zéû]+)\s+(\d{4})\s+(\d{1,2}):(\d{2})/,
+	);
+
+	if (!match?.[1] || !match[2] || !match[3] || !match[4] || !match[5]) {
+		throwParsingError(body, "parseEventDetails", `Unparseable ${field} date`, {
+			value,
+		});
+	}
+
+	const month = frenchMonthToIndex(match[2]);
+	if (month === null) {
+		throwParsingError(body, "parseEventDetails", `Unknown ${field} month`, {
+			month: match[2],
+			value,
+		});
+	}
+
+	const date = new Date(
+		Number.parseInt(match[3], 10),
+		month,
+		Number.parseInt(match[1], 10),
+		Number.parseInt(match[4], 10),
+		Number.parseInt(match[5], 10),
+	);
+
+	if (Number.isNaN(date.getTime())) {
+		throwParsingError(body, "parseEventDetails", `Invalid ${field} date`, {
+			value,
+		});
+	}
+
+	return date;
+}
+
+function frenchMonthToIndex(month: string): number | null {
+	const months: Record<string, number> = {
+		janvier: 0,
+		fevrier: 1,
+		février: 1,
+		mars: 2,
+		avril: 3,
+		mai: 4,
+		juin: 5,
+		juillet: 6,
+		aout: 7,
+		août: 7,
+		septembre: 8,
+		octobre: 9,
+		novembre: 10,
+		decembre: 11,
+		décembre: 11,
+	};
+
+	return months[month] ?? null;
+}
+
+function normalizeNullableText(value: string): string | null {
+	const normalized = normalizeText(value);
+
+	return normalized === "" ? null : normalized;
+}
+
+function normalizeHeaderText(value: string): string {
+	return decodeHtmlEntities(normalizeText(value))
+		.normalize("NFD")
+		.replaceAll(/[\u0300-\u036f]/g, "")
+		.toLowerCase();
+}
+
+function escapeRegExp(value: string): string {
+	return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

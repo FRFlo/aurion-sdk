@@ -4,6 +4,7 @@ export type { AurionError, AurionErrorCode } from "./errors";
 export { isAurionError } from "./errors";
 /** Client de session haut niveau pour l'accès aux notes Aurion. */
 export { AurionSession } from "./session";
+export { AurionPlanningGroup, AurionPlanningSubgroup, AurionAvailablePlanning } from "./promotions";
 /** Outils de cache publics du SDK. */
 export {
 	isAurionCacheEntryExpired,
@@ -34,12 +35,13 @@ export type {
 export { parseAbsences, toAurionAbsence } from "./parsers/absences";
 export { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
 export {
+	parseEventDetails,
 	parseFormIdPlanning,
 	parsePlanningEvents,
-	parseEventDetails,
 	parseSidebarMenuIdForMonPlanning,
 	isPlanningEvent,
 } from "./parsers/planning";
+export { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
 export {
 	parseAurionPlanningTitle,
 	parseLocationToAddress,
@@ -55,7 +57,5 @@ export {
 	decodeHtmlEntities,
 	throwParsingError,
 } from "./parsers/shared";
-export { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
-export { AurionPlanningGroup, AurionPlanningSubgroup, AurionAvailablePlanning } from "./promotions";
 export type { ParsingErrorDetails } from "./parsers/shared";
 export type { ParsedAurionPlanningTitle } from "./utils";

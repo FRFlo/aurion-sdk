@@ -1,113 +1,89 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseEventDetails } from "./planning";
+import { parseEventDetails, parsePlanningEvents } from "./planning";
 
 describe("parseEventDetails", () => {
-	test("extracts adjacent fields and parses French date rows", () => {
-		const body = `
-<partial-response id="j_id1">
-  <changes>
-    <update id="form:modaleDetail"><![CDATA[
-      <div id="form:modaleDetail">
-        <table class="ui-panelgrid ui-widget panelgrid-debut-fin" role="grid"><tbody>
-          <tr class="ui-widget-content" role="row">
-            <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span class="label">Du</span></label></td>
-            <td role="gridcell" class="ui-panelgrid-cell">lundi 9 février 2026</td>
-            <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span class="label">à</span></label></td>
-            <td role="gridcell" class="ui-panelgrid-cell">08:00</td>
-          </tr>
-          <tr class="ui-widget-content" role="row">
-            <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span class="label">Au</span></label></td>
-            <td role="gridcell" class="ui-panelgrid-cell">dimanche 8 décembre 2026</td>
-            <td role="gridcell" class="ui-panelgrid-cell"><label class="label"><span class="label">à</span></label></td>
-            <td role="gridcell" class="ui-panelgrid-cell">09:00</td>
-          </tr>
-        </tbody></table>
-        <div class="ui-grid-row">
-          <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span class="label">Statut</span></label></div>
-          <div class="ui-panelgrid-cell ui-grid-col-6">Planifié facultatif</div>
-        </div>
-        <div class="ui-grid-row">
-          <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span class="label">Matière</span></label></div>
-          <div class="ui-panelgrid-cell ui-grid-col-6">Pédagogique</div>
-        </div>
-        <div class="ui-grid-row">
-          <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span class="label">Type d'enseignement</span></label></div>
-          <div class="ui-panelgrid-cell ui-grid-col-6">Entreprise</div>
-        </div>
-        <div class="ui-grid-row">
-          <div class="ui-panelgrid-cell ui-grid-col-6"><label class="ev_libelle"><span class="ev_libelle">Description</span></label></div>
-          <div class="ui-panelgrid-cell ui-grid-col-6"></div>
-        </div>
-        <div class="ui-grid-row">
-          <div class="ui-panelgrid-cell ui-grid-col-6"><label class="label"><span class="label">Est une épreuve</span></label></div>
-          <div class="ui-panelgrid-cell ui-grid-col-6">Oui</div>
-        </div>
-      </div>
+	test("parses the saved empty planning events partial response", async () => {
+		const body = await Bun.file("aurion-cursus-161-response-body.txt").text();
 
-		      <ul class="ui-tabs-nav ui-helper-reset ui-helper-clearfix ui-widget-header ui-corner-all">
-        <li><a href="#form:onglets:j_idt201">Ressources</a></li>
-        <li><a href="#form:onglets:j_idt202">Intervenants</a></li>
-        <li><a href="#form:onglets:j_idt203">Apprenants (31)</a></li>
-        <li><a href="#form:onglets:j_idt204">Groupes</a></li>
-        <li><a href="#form:onglets:j_idt205">Cours</a></li>
-      </ul>
+		expect(parsePlanningEvents(body)).toEqual([]);
+	});
 
-      <div id="form:onglets:j_idt204" class="ui-tabs-panel">
-        <table class="ui-datatable"><thead><tr><th>Code</th><th>Libellé</th></tr></thead><tbody>
-          <tr><td>GRP1</td><td>Groupe 1</td></tr>
-        </tbody></table>
-      </div>
+	test("parses populated planning events whose titles contain square brackets", () => {
+		const payload = JSON.stringify({
+			events: [
+				{
+					id: "66383287",
+					title: "J104_COURS\n\n[ADI1] Mécanique du solide",
+					start: "2026-05-26T13:30:00+0200",
+					end: "2026-05-26T16:30:00+0200",
+					allDay: false,
+					editable: true,
+					className: "COURS_TD",
+				},
+			],
+		});
+		const body = `<?xml version='1.0' encoding='UTF-8'?>
+<partial-response id="j_id1"><changes><update id="form:j_idt118"><![CDATA[${payload}]]></update></changes></partial-response>`;
 
-      <div id="form:onglets:j_idt205" class="ui-tabs-panel">
-        <table class="ui-datatable"><thead><tr><th>Code</th><th>Cours</th><th>Module</th></tr></thead><tbody>
-          <tr><td>COURSE1</td><td>Cours 1</td><td>Module A</td></tr>
-        </tbody></table>
-      </div>
+		const events = parsePlanningEvents(body);
 
-      <div id="form:onglets:j_idt203" class="ui-tabs-panel">
-        <table class="ui-datatable"><thead><tr><th>Nom</th><th>Prénom</th></tr></thead><tbody>
-          <tr><td>Dupont</td><td>Marie</td></tr>
-        </tbody></table>
-      </div>
+		expect(events).toHaveLength(1);
+		expect(events[0]?.id).toBe("66383287");
+		expect(events[0]?.title).toContain("[ADI1]");
+		expect(events[0]?.type).toBe("COURS_TD");
+	});
 
-      <div id="form:onglets:j_idt202" class="ui-tabs-panel">
-        <table class="ui-datatable"><thead><tr><th>Nom</th><th>Prénom</th></tr></thead><tbody>
-          <tr><td>Martin</td><td>Jean</td></tr>
-        </tbody></table>
-      </div>
+	test("parses the real Aurion event detail partial response", async () => {
+		const body = await Bun.file("response-getEventDetails.xml").text();
 
-      <div id="form:onglets:j_idt201" class="ui-tabs-panel">
-        <table class="ui-datatable"><thead><tr><th>Code</th><th>Libellé</th></tr></thead><tbody>
-          <tr><td>RES1</td><td>Ressource 1</td></tr>
-        </tbody></table>
-      </div>
-    ]]></update>
-  </changes>
-</partial-response>`;
+		const details = parseEventDetails(body, "70063950");
 
-		const details = parseEventDetails(body, "evt-123");
-
-		expect(details.eventId).toBe("evt-123");
-		expect(details.status).toBe("Planifié facultatif");
-		expect(details.subject).toBe("Pédagogique");
-		expect(details.teachingType).toBe("Entreprise");
-		expect(details.description).toBeNull();
-		expect(details.isExam).toBe(true);
-		expect(details.teachers).toEqual([{ lastName: "Martin", firstName: "Jean" }]);
-		expect(details.students).toEqual([{ lastName: "Dupont", firstName: "Marie" }]);
-		expect(details.groups).toEqual([{ code: "GRP1", name: "Groupe 1" }]);
-		expect(details.courses).toEqual([{ code: "COURSE1", course: "Cours 1", module: "Module A" }]);
-		expect(details.resources).toEqual([{ code: "RES1", name: "Ressource 1" }]);
+		expect(details.eventId).toBe("70063950");
 		expect(details.start.getFullYear()).toBe(2026);
-		expect(details.start.getMonth()).toBe(1);
-		expect(details.start.getDate()).toBe(9);
-		expect(details.start.getHours()).toBe(8);
-		expect(details.start.getMinutes()).toBe(0);
+		expect(details.start.getMonth()).toBe(5);
+		expect(details.start.getDate()).toBe(15);
+		expect(details.start.getHours()).toBe(13);
+		expect(details.start.getMinutes()).toBe(30);
 		expect(details.end.getFullYear()).toBe(2026);
-		expect(details.end.getMonth()).toBe(11);
-		expect(details.end.getDate()).toBe(8);
-		expect(details.end.getHours()).toBe(9);
-		expect(details.end.getMinutes()).toBe(0);
+		expect(details.end.getMonth()).toBe(5);
+		expect(details.end.getDate()).toBe(15);
+		expect(details.end.getHours()).toBe(17);
+		expect(details.end.getMinutes()).toBe(55);
+		expect(details.status).toBe("Planifié");
+		expect(details.subject).toBe("Pédagogique");
+		expect(details.teachingType).toBe("Projet");
+		expect(details.description).toBeNull();
+		expect(details.isExam).toBe(false);
+		expect(details.resources).toEqual([
+			{
+				code: "ROOM_A1",
+				name: "ROOM A1 - LAB",
+			},
+		]);
+		expect(details.teachers).toEqual([
+			{
+				lastName: "DOE",
+				firstName: "Jane",
+			},
+		]);
+		expect(details.students).toHaveLength(31);
+		expect(details.students).toContainEqual({
+			lastName: "HODKIEWICZ",
+			firstName: "Kadin",
+		});
+		expect(details.groups).toEqual([
+			{
+				code: "YEAR3_CS",
+				name: "Computer Science Year 3",
+			},
+		]);
+		expect(details.courses).toEqual([
+			{
+				code: "YEAR3_CS_ELEC_PROJ",
+				course: "Software Project",
+				module: "Unité d'Enseignement Electronique, Signaux et Systèmes",
+			},
+		]);
 	});
 });

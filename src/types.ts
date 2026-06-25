@@ -142,48 +142,40 @@ export interface AurionPlanningEvent {
 	editable: boolean;
 	/** Type de l'événement (ex. "Cours", "TP", "Examen") tel que fourni par Aurion. */
 	type: string;
-	/**
-	 * Récupère les détails complets de l'événement depuis Aurion.
-	 *
-	 * Cette méthode déclenche l'ouverture du détail calendrier et renvoie les
-	 * informations complémentaires associées à l'événement courant.
-	 */
+	/** Charge les détails complets de l'événement depuis la modale Aurion. */
 	getDetails(): Promise<AurionPlanningEventDetails>;
 }
 
 /**
- * Détails complets d'un événement de planning.
- *
- * Cet objet complète les données affichées dans la vue planning avec les
- * informations récupérées dans la fenêtre de détail Aurion.
+ * Détails complets d'un événement de planning tels qu'affichés dans la modale Aurion.
  */
 export interface AurionPlanningEventDetails {
-	/** Identifiant de l'événement tel qu'il est connu par Aurion. */
+	/** Identifiant de l'événement détaillé. */
 	eventId: string;
-	/** Date et heure de début de l'événement. */
+	/** Date/heure de début affichée dans la modale. */
 	start: Date;
-	/** Date et heure de fin de l'événement. */
+	/** Date/heure de fin affichée dans la modale. */
 	end: Date;
-	/** Statut affiché dans la fiche de détail, ou `null` s'il est absent. */
+	/** Statut Aurion de l'événement, ou `null` si absent. */
 	status: string | null;
-	/** Matière associée à l'événement, ou `null` si Aurion ne la renseigne pas. */
+	/** Matière ou catégorie pédagogique, ou `null` si absente. */
 	subject: string | null;
-	/** Type d'enseignement associé à l'événement, ou `null` si non disponible. */
+	/** Type d'enseignement, ou `null` si absent. */
 	teachingType: string | null;
-	/** Description libre saisie dans Aurion, ou `null` si elle est vide. */
+	/** Description libre, ou `null` si vide. */
 	description: string | null;
-	/** Indique si l'événement correspond à une épreuve. */
+	/** Indique si l'événement est déclaré comme épreuve. */
 	isExam: boolean;
-	/** Liste des intervenants associés à l'événement. */
-	teachers: { lastName: string; firstName: string }[];
-	/** Liste des apprenants associés à l'événement. */
-	students: { lastName: string; firstName: string }[];
-	/** Liste des groupes rattachés à l'événement. */
-	groups: { code: string; name: string }[];
-	/** Liste des cours associés à l'événement. */
-	courses: { code: string; course: string; module: string }[];
-	/** Liste des ressources associées à l'événement. */
-	resources: { code: string; name: string }[];
+	/** Intervenants associés à l'événement. */
+	teachers: Array<{ lastName: string; firstName: string }>;
+	/** Apprenants associés à l'événement. */
+	students: Array<{ lastName: string; firstName: string }>;
+	/** Groupes associés à l'événement. */
+	groups: Array<{ code: string; name: string }>;
+	/** Cours associés à l'événement. */
+	courses: Array<{ code: string; course: string; module: string }>;
+	/** Ressources ou salles associées à l'événement. */
+	resources: Array<{ code: string; name: string }>;
 }
 
 /**

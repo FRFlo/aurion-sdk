@@ -8,28 +8,14 @@ import { createAurionError, isAurionError } from "./errors";
 import { parseAbsences, toAurionAbsence } from "./parsers/absences";
 import { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
 import {
+	parseEventDetails,
 	parseFormIdPlanning,
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
-	parseEventDetails,
 } from "./parsers/planning";
-import {
-	parseDateOrThrow,
-	parseIdInit,
-	parseMenuId,
-	parseViewState,
-	extractTags,
-	extractElementBlocks,
-	stripTags,
-	normalizeWhitespace,
-} from "./parsers/shared";
-import { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
-import {
-	AurionPlanningGroup,
-	AurionPlanningSubgroup,
-	AurionAvailablePlanning,
-	type AurionPlanningNavigator,
-} from "./promotions";
+import { parseAvailablePlannings, parseMenuChildren, parseSubmenuId } from "./parsers/promotions";
+import { parseDateOrThrow, parseIdInit, parseMenuId, parseViewState } from "./parsers/shared";
+import { AurionAvailablePlanning, AurionPlanningGroup, AurionPlanningSubgroup } from "./promotions";
 import { AurionTransport } from "./transport";
 import type {
 	AurionCacheStore,
@@ -47,9 +33,8 @@ const DEFAULT_AURION_BASE_URL = "https://aurion.junia.com";
 const MAIN_MENU_SUBMENU_ID = "submenu_44413";
 const AURION_USER_CONTEXT_ID = "44323";
 const FORM_URLENCODED_HEADERS = {
-	"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+	"Content-Type": "application/x-www-form-urlencoded",
 } as const;
-
 const PRIMEFACES_AJAX_HEADERS = {
 	...FORM_URLENCODED_HEADERS,
 	Accept: "application/xml, text/xml, */*; q=0.01",
@@ -79,6 +64,9 @@ export class AurionSession {
 	private readonly transport: AurionTransport;
 	private readonly sessionCacheMaxAgeMs?: number;
 	private readonly planningTimeRangeApproximationMs?: number;
+	private readonly navigationNodes = new Map<AurionNavigationNodeId, AurionNavigationNode>();
+	private readonly planningGroupSnapshots = new Map<string, MainMenuSnapshot>();
+	private readonly choixPlanningSnapshots = new Map<string, ChoixPlanningSnapshot>();
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
@@ -134,19 +122,11 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: GradesNavigationState = {
-				viewState: "",
-				formId: "",
-				menuId: "",
-				idInit: "",
-				formIdGrade: "",
-			};
+			const rawGrades = await this.withNavigationRetry("gradesPage", async () => {
+				const state = await this.resolveGradesPageNode();
 
-			await this.initializeSession(state);
-			await this.postMainMenu(state);
-			await this.postMainSidebar(state);
-
-			const rawGrades = await this.postGrade(state);
+				return this.postGrade(state);
+			});
 
 			const grades = rawGrades.map((rawGrade) => toAurionGrade(rawGrade));
 			await this.writeCachedValue(cacheKey, grades);
@@ -197,34 +177,27 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: PlanningNavigationState = {
-				viewState: "",
-				menuId: "",
-				idInit: "",
-				formIdPlanning: "",
-			};
-
-			await this.initializeRootNavigationState(state, {
-				includeFormId: false,
+			const planningDate = new Date(cacheWindow.startTimestamp);
+			const today = planningDate.toLocaleDateString("fr-FR", {
+				day: "2-digit",
+				month: "2-digit",
+				year: "numeric",
 			});
+			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
+			const year = String(planningDate.getFullYear());
 
-			await this.loadPlanningSidebarMenuId(state);
-			await this.postSidebarNavigation(state, "getPlanning:postMainSidebar");
-			await this.loadPlanningFormState(state);
+			const response = await this.withNavigationRetry("planningPage", async () => {
+				const state = await this.resolvePlanningPageNode();
 
-			const requestContext = createPlanningRequestContext(
-				options ? cacheWindow : null,
-				state.planningPageBody,
-			);
-
-			const response = await this.postPlanning(
-				state,
-				requestContext.startTimestamp,
-				requestContext.endTimestamp,
-				requestContext.today,
-				requestContext.week,
-				requestContext.year,
-			);
+				return this.postPlanning(
+					state,
+					cacheWindow.startTimestamp,
+					cacheWindow.endTimestamp,
+					today,
+					week,
+					year,
+				);
+			});
 
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
@@ -243,12 +216,187 @@ export class AurionSession {
 		}
 	}
 
+	async getPlanningsGroups(): Promise<AurionPlanningGroup[]> {
+		try {
+			await this.transport.login();
+
+			const root = await this.resolveRootNavigationNode({
+				includeFormId: true,
+			});
+			const rootBody = requireRootBody(root);
+			const mainMenuSnapshot = await this.loadPlanningGroupSubmenu(MAIN_MENU_SUBMENU_ID);
+			const mainMenuBody = `${rootBody}\n${mainMenuSnapshot.body}`;
+			let groupSubmenuId = tryParseSubmenuId(mainMenuBody, "Plannings Groupés par Promotion");
+
+			if (!groupSubmenuId) {
+				const planningsSubmenuId = parseSubmenuId(mainMenuBody, "Les plannings");
+				const planningsSnapshot = await this.loadPlanningGroupSubmenu(planningsSubmenuId);
+				groupSubmenuId =
+					tryParseSubmenuId(planningsSnapshot.body, "Plannings Groupés par Promotion") ??
+					planningsSubmenuId;
+			}
+
+			const snapshot = await this.loadPlanningGroupSubmenu(groupSubmenuId);
+			const children = parseMenuChildren(snapshot.body, groupSubmenuId);
+
+			return children
+				.filter((child) => child.type === "submenu")
+				.map((child) => new AurionPlanningGroup(child.name, child.id, this));
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des groupes de planning Aurion.",
+				error,
+			);
+		}
+	}
+
+	async getSubgroups(
+		submenuId: string,
+		preState?: PlanningNavigationState,
+	): Promise<AurionPlanningSubgroup[]> {
+		try {
+			await this.transport.login();
+
+			return await this.collectPlanningSubgroups(submenuId, preState, new Set<string>());
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des sous-groupes de planning Aurion.",
+				error,
+			);
+		}
+	}
+
+	private async collectPlanningSubgroups(
+		submenuId: string,
+		_preState: PlanningNavigationState | undefined,
+		visitedSubmenuIds: Set<string>,
+	): Promise<AurionPlanningSubgroup[]> {
+		if (visitedSubmenuIds.has(submenuId)) {
+			return [];
+		}
+
+		visitedSubmenuIds.add(submenuId);
+
+		const snapshot = await this.loadPlanningGroupSubmenu(submenuId);
+		const children = parseMenuChildren(snapshot.body, submenuId);
+		const subgroups: AurionPlanningSubgroup[] = [];
+
+		for (const child of children) {
+			if (child.type === "item") {
+				subgroups.push(new AurionPlanningSubgroup(child.name, child.id, this));
+				continue;
+			}
+
+			subgroups.push(
+				...(await this.collectPlanningSubgroups(child.id, undefined, visitedSubmenuIds)),
+			);
+		}
+
+		return subgroups;
+	}
+
+	async getAvailablePlannings(menuId: string): Promise<AurionAvailablePlanning[]> {
+		try {
+			await this.transport.login();
+
+			const snapshot = await this.loadChoixPlanningSnapshot(menuId);
+			const plannings = parseAvailablePlannings(snapshot.body);
+
+			return plannings.map(
+				(planning) => new AurionAvailablePlanning(planning.name, planning.id, menuId, this),
+			);
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des plannings disponibles Aurion.",
+				error,
+			);
+		}
+	}
+
+	async getPlanningForGroup(
+		menuId: string,
+		planningId: string,
+		options?: AurionPlanningOptions,
+	): Promise<AurionPlanningEvent[]> {
+		const exactWindow = resolvePlanningWindow(options);
+		const cacheWindow = approximatePlanningWindow(
+			exactWindow,
+			this.planningTimeRangeApproximationMs,
+		);
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:planningGroup:${menuId}:${planningId}:${serializePlanningWindow(cacheWindow)}`,
+		);
+
+		try {
+			const cached =
+				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
+			if (cached) {
+				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
+			}
+
+			await this.transport.login();
+
+			const planningDate = new Date(cacheWindow.startTimestamp);
+			const today = planningDate.toLocaleDateString("fr-FR", {
+				day: "2-digit",
+				month: "2-digit",
+				year: "numeric",
+			});
+			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
+			const year = String(planningDate.getFullYear());
+
+			const planningState = await this.loadPlanningForGroupState(menuId, planningId);
+			const response = await this.postPlanning(
+				planningState,
+				cacheWindow.startTimestamp,
+				cacheWindow.endTimestamp,
+				today,
+				week,
+				year,
+			);
+
+			const planning = parsePlanningEvents(response.body);
+			await this.writeCachedValue(cacheKey, planning);
+
+			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération du planning de groupe Aurion.",
+				error,
+			);
+		}
+	}
+
 	/**
-	 * Récupère les détails d'un événement de planning.
+	 * Récupère les détails complets d'un événement de planning Aurion.
 	 *
-	 * @param eventId L'identifiant de l'événement.
-	 * @returns Les détails de l'événement.
-	 * @throws {AurionError} Si la récupération ou le parsing échoue.
+	 * Cette méthode reproduit l'action PrimeFaces `eventSelect` du calendrier pour
+	 * faire rendre la modale `form:modaleDetail`, puis parse son contenu.
+	 *
+	 * @param eventId Identifiant de l'événement à détailler.
+	 * @returns Les détails complets affichés par Aurion pour cet événement.
+	 * @throws {AurionError} Si la navigation, la requête AJAX ou le parsing échoue.
 	 */
 	async getEventDetails(eventId: string): Promise<AurionPlanningEventDetails> {
 		const cacheKey = createAurionValueCacheKey(
@@ -264,48 +412,11 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: PlanningNavigationState = {
-				viewState: "",
-				menuId: "",
-				idInit: "",
-				formIdPlanning: "",
-			};
+			const response = await this.withNavigationRetry("planningPage", async () => {
+				const state = await this.resolvePlanningPageNode();
 
-			await this.initializeRootNavigationState(state, {
-				includeFormId: false,
+				return this.postEventDetails(state, eventId);
 			});
-
-			await this.loadPlanningSidebarMenuId(state);
-			await this.postSidebarNavigation(state, "getEventDetails:postMainSidebar");
-			await this.loadPlanningFormState(state);
-
-			const sourceId = state.formIdPlanning;
-			const postData = state.planningPageBody
-				? createUrlSearchParamsFromForm(state.planningPageBody)
-				: new URLSearchParams();
-
-			const requestFields: Record<string, string> = {
-				"javax.faces.partial.ajax": "true",
-				"javax.faces.source": sourceId,
-				"javax.faces.partial.execute": sourceId,
-				"javax.faces.partial.render": "form:modaleDetail form:confirmerSuppression",
-				"javax.faces.behavior.event": "eventSelect",
-				"javax.faces.partial.event": "eventSelect",
-				[`${sourceId}_selectedEventId`]: eventId,
-				"javax.faces.ViewState": state.viewState,
-			};
-
-			overlayParams(postData, requestFields);
-
-			const response = await this.transport.request({
-				path: "/faces/Planning.xhtml",
-				method: "POST",
-				body: postData,
-				headers: { ...PRIMEFACES_AJAX_HEADERS, Referer: `${this.baseUrl}/faces/Planning.xhtml` },
-				cache: false,
-			});
-
-			assertNavigationSuccess("getEventDetails:postEventSelect", response.status, response.url);
 
 			const details = parseEventDetails(response.body, eventId);
 			await this.writeCachedValue(cacheKey, details);
@@ -318,19 +429,10 @@ export class AurionSession {
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
-				"Erreur inattendue durant la récupération des détails de l'événement.",
+				"Erreur inattendue durant la récupération des détails d'événement Aurion.",
 				error,
 			);
 		}
-	}
-
-	private attachEventMethods(
-		events: Array<Omit<AurionPlanningEvent, "getDetails">>,
-	): AurionPlanningEvent[] {
-		return events.map((event) => ({
-			...event,
-			getDetails: () => this.getEventDetails(event.id),
-		}));
 	}
 
 	/**
@@ -358,22 +460,11 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: AbsencesNavigationState = {
-				viewState: "",
-				formId: "",
-				menuId: "",
-				idInit: "",
-			};
+			const rawAbsences = await this.withNavigationRetry("absencesPage", async () => {
+				const state = await this.resolveAbsencesPageNode();
 
-			await this.initializeRootNavigationState(state, {
-				includeFormId: true,
+				return this.postAbsencesTable(state);
 			});
-
-			await this.postAbsencesMainMenu(state);
-			await this.postSidebarNavigation(state, "getAbsences:postMainSidebar");
-			await this.loadAbsencesPageState(state);
-
-			const rawAbsences = await this.postAbsencesTable(state);
 
 			const absences = rawAbsences.map((rawAbsence) => toAurionAbsence(rawAbsence));
 			await this.writeCachedValue(cacheKey, absences);
@@ -393,181 +484,6 @@ export class AurionSession {
 	}
 
 	/**
-	 * Charge les groupes racines de « Plannings Groupés par Promotion ».
-	 *
-	 * La méthode reproduit la navigation PrimeFaces du menu latéral Aurion en
-	 * sérialisant le formulaire JSF courant, puis ouvre successivement « Les
-	 * plannings » et « Plannings Groupés par Promotion ».
-	 *
-	 * @returns Les groupes de plannings directement disponibles à la racine du menu groupé.
-	 * @throws {AurionError} Si la navigation Aurion échoue ou si le menu ne peut pas être parsé.
-	 */
-	async getPlanningsGroups(): Promise<AurionPlanningGroup[]> {
-		await this.transport.login();
-
-		const mainMenu = await this.loadMainMenuSnapshot("getPlanningsGroups:loadMainMenu");
-		const planningsSubmenuId = parseSubmenuId(mainMenu.body, "Les plannings");
-		const planningsMenu = await this.postMainMenuSubmenu(
-			mainMenu,
-			planningsSubmenuId,
-			"getPlanningsGroups:openPlanningsMenu",
-		);
-		const groupedSubmenuId = parseSubmenuId(planningsMenu.body, "Plannings Groupés par Promotion");
-		const groupedMenu = await this.postMainMenuSubmenu(
-			planningsMenu,
-			groupedSubmenuId,
-			"getPlanningsGroups:openGroupedPlanningsMenu",
-		);
-
-		const children = parseMenuChildren(groupedMenu.body, groupedSubmenuId);
-		return children.map(
-			(entry) => new AurionPlanningGroup(entry.name, entry.id, this as AurionPlanningNavigator),
-		);
-	}
-
-	/**
-	 * Charge les enfants directs d'un groupe de plannings déjà identifié.
-	 *
-	 * @param submenuId Identifiant PrimeFaces `submenu_XXXXX` du groupe à ouvrir.
-	 * @param preState État de navigation optionnel réutilisable lorsque le menu est déjà chargé.
-	 * @returns Les sous-groupes terminaux contenus dans le groupe.
-	 * @throws {AurionError} Si le sous-menu ne peut pas être ouvert ou analysé.
-	 */
-	async getSubgroups(
-		submenuId: string,
-		preState?: PlanningNavigationState,
-	): Promise<AurionPlanningSubgroup[]> {
-		await this.transport.login();
-
-		const baseMenu = preState?.mainMenuBody
-			? {
-					body: preState.mainMenuBody,
-					formBody: preState.mainMenuBody,
-					viewState: preState.viewState,
-					idInit: preState.idInit,
-				}
-			: await this.loadGroupedPlanningsMenuSnapshot("getSubgroups:prepareGroupedMenu");
-		const response = await this.postMainMenuSubmenu(
-			baseMenu,
-			submenuId,
-			"getSubgroups:openSubmenu",
-		);
-
-		const children = parseMenuChildren(response.body, submenuId);
-		return children.map(
-			(entry) => new AurionPlanningSubgroup(entry.name, entry.id, this as AurionPlanningNavigator),
-		);
-	}
-
-	/**
-	 * Charge les plannings disponibles pour un sous-groupe terminal.
-	 *
-	 * @param menuId Identifiant `form:sidebar_menuid` du sous-groupe terminal.
-	 * @returns Les plannings sélectionnables dans la page `ChoixPlanning.xhtml`.
-	 * @throws {AurionError} Si la page de choix ne peut pas être ouverte ou parsée.
-	 */
-	async getAvailablePlannings(menuId: string): Promise<AurionAvailablePlanning[]> {
-		await this.transport.login();
-		const choixPlanning = await this.openChoixPlanning(menuId, "getAvailablePlannings");
-		const plannings = parseAvailablePlannings(choixPlanning.body);
-		return plannings.map(
-			(p) =>
-				new AurionAvailablePlanning(
-					p.name,
-					p.code,
-					p.label,
-					p.validityEnd,
-					p.kind,
-					p.id,
-					menuId,
-					this,
-				),
-		);
-	}
-
-	/**
-	 * Sélectionne un planning groupé et récupère ses événements.
-	 *
-	 * Cette méthode ouvre d'abord le sous-groupe dans `ChoixPlanning.xhtml`, sélectionne
-	 * la ligne PrimeFaces demandée, puis réutilise la requête calendrier et le parseur
-	 * existants pour obtenir les événements normalisés.
-	 *
-	 * @param menuId Identifiant du sous-groupe terminal dans le menu latéral.
-	 * @param planningId Identifiant `data-rk` du planning à sélectionner.
-	 * @param options Fenêtre temporelle optionnelle à appliquer au calendrier.
-	 * @returns Les événements du planning sélectionné, filtrés sur la fenêtre demandée.
-	 * @throws {AurionError} Si la sélection ou la lecture du calendrier échoue.
-	 */
-	async getPlanningForGroup(
-		menuId: string,
-		planningId: string,
-		options?: AurionPlanningOptions,
-	): Promise<AurionPlanningEvent[]> {
-		const exactWindow = resolvePlanningWindow(options);
-		const cacheWindow = approximatePlanningWindow(
-			exactWindow,
-			this.planningTimeRangeApproximationMs,
-		);
-		const cacheKey = createAurionValueCacheKey(
-			"session",
-			`${this.getSessionCacheScope()}:planningGroup:${planningId}:${serializePlanningWindow(cacheWindow)}`,
-		);
-
-		try {
-			const cached =
-				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
-			if (cached) {
-				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
-			}
-
-			await this.transport.login();
-
-			const choixPlanning = await this.openChoixPlanning(menuId, "getPlanningForGroup");
-			const planningPageBody = await this.openSelectedPlanning(
-				choixPlanning.body,
-				planningId,
-				"getPlanningForGroup:postSelection",
-			);
-			const state: PlanningNavigationState = {
-				viewState: parseViewState(planningPageBody),
-				menuId,
-				idInit: choixPlanning.idInit,
-				formIdPlanning: parseFormIdPlanning(planningPageBody),
-				planningPageBody,
-			};
-
-			const requestContext = createPlanningRequestContext(
-				options ? cacheWindow : null,
-				planningPageBody,
-			);
-
-			const response = await this.postPlanning(
-				state,
-				requestContext.startTimestamp,
-				requestContext.endTimestamp,
-				requestContext.today,
-				requestContext.week,
-				requestContext.year,
-			);
-
-			const planning = parsePlanningEvents(response.body);
-			await this.writeCachedValue(cacheKey, planning);
-
-			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
-		} catch (error: unknown) {
-			if (isAurionError(error)) {
-				throw error;
-			}
-
-			throw createAurionError(
-				"AURION_UNKNOWN_ERROR",
-				"Erreur inattendue durant la récupération du planning de groupe.",
-				error,
-			);
-		}
-	}
-
-	/**
 	 * Charge la page initiale et extrait les identifiants de session JSF.
 	 *
 	 * @param state État de navigation des notes à compléter.
@@ -580,6 +496,157 @@ export class AurionSession {
 		});
 	}
 
+	private async resolveRootNavigationNode(options: {
+		includeFormId: boolean;
+	}): Promise<RootNavigationState> {
+		const cached = this.readNavigationNode<RootNavigationState>("root");
+		if (cached && (!options.includeFormId || cached.formId)) {
+			return cached;
+		}
+
+		if (cached) {
+			this.invalidateNavigationNode("root");
+		}
+
+		const state: RootNavigationState = {
+			viewState: "",
+			idInit: "",
+		};
+
+		await this.initializeRootNavigationState(state, options);
+		this.writeNavigationNode("root", null, state);
+
+		return state;
+	}
+
+	private async resolveGradesMenuNode(): Promise<GradesMenuNavigationState> {
+		const cached = this.readNavigationNode<GradesMenuNavigationState>("gradesMenu");
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: true,
+		});
+		const state: GradesMenuNavigationState = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			formId: requireRootFormId(root),
+			menuId: "",
+		};
+
+		await this.postMainMenu(state);
+		this.writeNavigationNode("gradesMenu", "root", state);
+
+		return state;
+	}
+
+	private async resolveGradesPageNode(): Promise<GradesNavigationState> {
+		const cached = this.readNavigationNode<GradesNavigationState>("gradesPage");
+		if (cached) {
+			return cached;
+		}
+
+		const menu = await this.resolveGradesMenuNode();
+		const state: GradesNavigationState = {
+			viewState: menu.viewState,
+			idInit: menu.idInit,
+			formId: menu.formId,
+			menuId: menu.menuId,
+			formIdGrade: "",
+		};
+
+		await this.postMainSidebar(state);
+		this.writeNavigationNode("gradesPage", "gradesMenu", state);
+
+		return state;
+	}
+
+	private async resolvePlanningMenuNode(): Promise<PlanningMenuNavigationState> {
+		const cached = this.readNavigationNode<PlanningMenuNavigationState>("planningMenu");
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: false,
+		});
+		const state: PlanningMenuNavigationState = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			menuId: "",
+		};
+
+		await this.loadPlanningSidebarMenuId(state);
+		this.writeNavigationNode("planningMenu", "root", state);
+
+		return state;
+	}
+
+	private async resolvePlanningPageNode(): Promise<PlanningNavigationState> {
+		const cached = this.readNavigationNode<PlanningNavigationState>("planningPage");
+		if (cached) {
+			return cached;
+		}
+
+		const menu = await this.resolvePlanningMenuNode();
+		const state: PlanningNavigationState = {
+			viewState: menu.viewState,
+			idInit: menu.idInit,
+			menuId: menu.menuId,
+			formIdPlanning: "",
+		};
+
+		await this.postSidebarNavigation(state, "getPlanning:postMainSidebar");
+		await this.loadPlanningFormState(state);
+		this.writeNavigationNode("planningPage", "planningMenu", state);
+
+		return state;
+	}
+
+	private async resolveAbsencesMenuNode(): Promise<AbsencesNavigationState> {
+		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesMenu");
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: true,
+		});
+		const state: AbsencesNavigationState = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			formId: requireRootFormId(root),
+			menuId: "",
+		};
+
+		await this.postAbsencesMainMenu(state);
+		this.writeNavigationNode("absencesMenu", "root", state);
+
+		return state;
+	}
+
+	private async resolveAbsencesPageNode(): Promise<AbsencesNavigationState> {
+		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesPage");
+		if (cached) {
+			return cached;
+		}
+
+		const menu = await this.resolveAbsencesMenuNode();
+		const state: AbsencesNavigationState = {
+			viewState: menu.viewState,
+			idInit: menu.idInit,
+			formId: menu.formId,
+			menuId: menu.menuId,
+		};
+
+		await this.postSidebarNavigation(state, "getAbsences:postMainSidebar");
+		await this.loadAbsencesPageState(state);
+		this.writeNavigationNode("absencesPage", "absencesMenu", state);
+
+		return state;
+	}
+
 	/**
 	 * Ouvre le sous-menu principal qui mène à la zone des notes.
 	 *
@@ -587,7 +654,7 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque l'identifiant de menu latéral est disponible.
 	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
 	 */
-	private async postMainMenu(state: GradesNavigationState): Promise<void> {
+	private async postMainMenu(state: GradesMenuNavigationState): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
 			"javax.faces.source": state.formId,
@@ -648,7 +715,7 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque le menu planning est identifié.
 	 * @throws {AurionError} Si l'écran principal ou le menu planning ne peuvent pas être lus.
 	 */
-	private async loadPlanningSidebarMenuId(state: PlanningNavigationState): Promise<void> {
+	private async loadPlanningSidebarMenuId(state: PlanningMenuNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MainMenuPage.xhtml",
 			method: "GET",
@@ -682,7 +749,154 @@ export class AurionSession {
 		assertNavigationSuccess("getPlanning:loadPlanningPage", response.status, response.url);
 		state.viewState = parseViewState(response.body);
 		state.formIdPlanning = parseFormIdPlanning(response.body);
-		state.planningPageBody = response.body;
+		state.dateInput = parseInputValue(response.body, "form:date_input");
+		state.weekInput = parseInputValue(response.body, "form:week");
+	}
+
+	private async loadPlanningGroupSubmenu(submenuId: string): Promise<MainMenuSnapshot> {
+		const cached = this.planningGroupSnapshots.get(submenuId);
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: true,
+		});
+		const formId = requireRootFormId(root);
+		const postData = new URLSearchParams({
+			"javax.faces.partial.ajax": "true",
+			"javax.faces.source": formId,
+			"javax.faces.partial.execute": formId,
+			"javax.faces.partial.render": "form:sidebar",
+			[formId]: formId,
+			"webscolaapp.Sidebar.ID_SUBMENU": submenuId,
+			...createMainMenuCommonFields(root.idInit, "1605"),
+			...createFormFocusAndInputFields("form:j_idt773_focus", "form:j_idt773_input"),
+			"javax.faces.ViewState": root.viewState,
+		});
+
+		const response = await this.transport.request({
+			path: "/faces/MainMenuPage.xhtml",
+			method: "POST",
+			body: postData,
+			headers: PRIMEFACES_AJAX_HEADERS,
+			cache: false,
+		});
+
+		assertNavigationSuccess("getPlanningsGroups:loadSubmenu", response.status, response.url);
+
+		const snapshot = {
+			body: response.body,
+			formBody: response.body,
+			viewState: parseViewStateOrFallback(response.body, root.viewState),
+			idInit: root.idInit,
+		};
+		this.planningGroupSnapshots.set(submenuId, snapshot);
+
+		return snapshot;
+	}
+
+	private async loadChoixPlanningSnapshot(menuId: string): Promise<ChoixPlanningSnapshot> {
+		const cached = this.choixPlanningSnapshots.get(menuId);
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: false,
+		});
+		const state = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			menuId,
+		};
+		const response = await this.postSidebarNavigation(
+			state,
+			"getAvailablePlannings:postMainSidebar",
+		);
+		const body = response.body;
+		const snapshot = {
+			body,
+			idInit: parseIdInitOrFallback(body, root.idInit),
+			viewState: parseViewStateOrFallback(body, root.viewState),
+		};
+		this.choixPlanningSnapshots.set(menuId, snapshot);
+
+		return snapshot;
+	}
+
+	private async loadPlanningForGroupState(
+		menuId: string,
+		planningId: string,
+	): Promise<PlanningNavigationState> {
+		const snapshot = await this.loadChoixPlanningSnapshot(menuId);
+		const tableId = parseChoixPlanningTableId(snapshot.body);
+		const submitButtonId = parseChoixPlanningSubmitButtonId(snapshot.body);
+		const postData = new URLSearchParams({
+			form: "form",
+			"form:largeurDivCenter": "1620",
+			"form:idInit": snapshot.idInit,
+			"form:messagesRubriqueInaccessible": "",
+			"form:search-texte": "",
+			"form:search-texte-avancer": "",
+			"form:input-expression-exacte": "",
+			"form:input-un-des-mots": "",
+			"form:input-aucun-des-mots": "",
+			"form:input-nombre-debut": "",
+			"form:input-nombre-fin": "",
+			"form:calendarDebut_input": "",
+			"form:calendarFin_input": "",
+			[`${tableId}_reflowDD`]: "0_0",
+			[`${tableId}:j_idt186:filter`]: "",
+			[`${tableId}:j_idt188:filter`]: "",
+			[`${tableId}:j_idt190:filter`]: "",
+			[`${tableId}:j_idt192:filter`]: "",
+			[`${tableId}_checkbox`]: "on",
+			[`${tableId}_selection`]: planningId,
+			[submitButtonId]: "",
+			"javax.faces.ViewState": snapshot.viewState,
+		});
+
+		const response = await this.transport.request({
+			path: "/faces/ChoixPlanning.xhtml",
+			method: "POST",
+			body: postData,
+			headers: FORM_URLENCODED_HEADERS,
+			cache: false,
+		});
+
+		assertNavigationSuccess("getPlanningForGroup:selectPlanning", response.status, response.url);
+
+		let planningPageBody = response.body;
+		let formIdPlanning = tryParseFormIdPlanning(planningPageBody);
+		if (!formIdPlanning) {
+			planningPageBody = await this.loadPlanningPageAfterGroupSelection();
+			formIdPlanning = parseFormIdPlanning(planningPageBody);
+		}
+
+		return {
+			viewState: parseViewState(planningPageBody),
+			idInit: parseIdInitOrFallback(planningPageBody, snapshot.idInit),
+			menuId,
+			formIdPlanning,
+			dateInput: parseInputValue(planningPageBody, "form:date_input"),
+			weekInput: parseInputValue(planningPageBody, "form:week"),
+		};
+	}
+
+	private async loadPlanningPageAfterGroupSelection(): Promise<string> {
+		const response = await this.transport.request({
+			path: "/faces/Planning.xhtml",
+			method: "GET",
+			headers: {
+				Referer: `${this.baseUrl}/faces/ChoixPlanning.xhtml`,
+			},
+			cache: false,
+		});
+
+		assertNavigationSuccess("getPlanningForGroup:loadPlanningPage", response.status, response.url);
+
+		return response.body;
 	}
 
 	/**
@@ -715,14 +929,12 @@ export class AurionSession {
 			[`${sourceId}_start`]: String(startTimestamp),
 			[`${sourceId}_end`]: String(endTimestamp),
 			...createMainMenuCommonFields(state.idInit, ""),
-			"form:largeurDivCenter": "",
 			"form:date_input": today,
 			"form:week": `${week}-${year}`,
 			[`${sourceId}_view`]: "agendaWeek",
 			"form:offsetFuseauNavigateur": "-7200000",
 			"form:onglets_activeIndex": "0",
 			"form:onglets_scrollState": "0",
-			...createFormFocusAndInputFields("form:j_idt244_focus", "form:j_idt244_input"),
 			"javax.faces.ViewState": state.viewState,
 		});
 
@@ -734,41 +946,61 @@ export class AurionSession {
 			cache: false,
 		});
 
-		if (response.status < 200 || response.status >= 300) {
-			throw createAurionError(
-				"AURION_NAVIGATION_ERROR",
-				"Navigation Aurion échouée à l'étape getPlanning:postPlanning.",
-				{
-					step: "getPlanning:postPlanning",
-					status: response.status,
-					url: response.url,
-					expected: "2xx",
-					sourceId,
-					formFields: summarizePlanningFormFields(postData),
-					scheduleSnippet: state.planningPageBody
-						? extractScheduleWidgetSnippet(state.planningPageBody, sourceId)
-						: null,
-					responseSnippet: response.body.slice(0, 700),
-				},
-			);
-		}
-		if (response.body.includes("<error>")) {
-			throw createAurionError(
-				"AURION_PARSING_ERROR",
-				"Aurion a rejeté la requête AJAX du composant planning.",
-				{
-					parser: "postPlanning",
-					url: response.url,
-					status: response.status,
-					sourceId,
-					formFields: summarizePlanningFormFields(postData),
-					scheduleSnippet: state.planningPageBody
-						? extractScheduleWidgetSnippet(state.planningPageBody, sourceId)
-						: null,
-					responseSnippet: response.body.slice(0, 500),
-				},
-			);
-		}
+		assertNavigationSuccess("getPlanning:postPlanning", response.status, response.url);
+
+		return {
+			body: response.body,
+		};
+	}
+
+	/**
+	 * Déclenche l'action PrimeFaces `eventSelect` du planning pour rendre la modale de détails.
+	 *
+	 * @param state État de navigation du planning contenant les identifiants JSF actifs.
+	 * @param eventId Identifiant d'événement sélectionné.
+	 * @returns Un objet contenant le corps XML partiel renvoyé par Aurion.
+	 * @throws {AurionError} Si l'appel PrimeFaces échoue.
+	 */
+	private async postEventDetails(
+		state: PlanningNavigationState,
+		eventId: string,
+	): Promise<{ body: string }> {
+		const sourceId = state.formIdPlanning;
+		const fallbackDate = new Date();
+		const today = fallbackDate.toLocaleDateString("fr-FR", {
+			day: "2-digit",
+			month: "2-digit",
+			year: "numeric",
+		});
+		const week = String(getWeekNumber(fallbackDate)).padStart(2, "0");
+		const year = String(fallbackDate.getFullYear());
+		const postData = new URLSearchParams({
+			"javax.faces.partial.ajax": "true",
+			"javax.faces.source": sourceId,
+			"javax.faces.partial.execute": sourceId,
+			"javax.faces.partial.render": "form:modaleDetail form:confirmerSuppression",
+			"javax.faces.behavior.event": "eventSelect",
+			"javax.faces.partial.event": "eventSelect",
+			[`${sourceId}_selectedEventId`]: eventId,
+			...createMainMenuCommonFields(state.idInit, "1605"),
+			"form:date_input": state.dateInput ?? today,
+			"form:week": state.weekInput ?? `${week}-${year}`,
+			[`${sourceId}_view`]: "agendaWeek",
+			"form:offsetFuseauNavigateur": "-7200000",
+			"form:onglets_activeIndex": "0",
+			"form:onglets_scrollState": "0",
+			"javax.faces.ViewState": state.viewState,
+		});
+
+		const response = await this.transport.request({
+			path: "/faces/Planning.xhtml",
+			method: "POST",
+			body: postData,
+			headers: PRIMEFACES_AJAX_HEADERS,
+			cache: false,
+		});
+
+		assertNavigationSuccess("getEventDetails:postEventSelect", response.status, response.url);
 
 		return {
 			body: response.body,
@@ -944,7 +1176,7 @@ export class AurionSession {
 	 * @throws {AurionError} Si la page racine ou ses identifiants JSF sont indisponibles.
 	 */
 	private async initializeRootNavigationState(
-		state: { viewState: string; idInit: string; formId?: string },
+		state: { viewState: string; idInit: string; formId?: string; body?: string },
 		options: { includeFormId: boolean },
 	): Promise<void> {
 		const response = await this.transport.request({
@@ -957,6 +1189,7 @@ export class AurionSession {
 
 		state.viewState = parseViewState(response.body);
 		state.idInit = parseIdInit(response.body);
+		state.body = response.body;
 
 		if (options.includeFormId) {
 			state.formId = parseFormId(response.body);
@@ -974,7 +1207,7 @@ export class AurionSession {
 	private async postSidebarNavigation(
 		state: { viewState: string; idInit: string; menuId: string },
 		step: string,
-	): Promise<void> {
+	): Promise<{ body: string }> {
 		const postData = new URLSearchParams({
 			...createMainMenuCommonFields(state.idInit),
 			...createFormFocusAndInputFields("form:j_idt773_focus", "form:j_idt773_input"),
@@ -992,188 +1225,60 @@ export class AurionSession {
 		});
 
 		assertNavigationSuccess(step, response.status, response.url);
-	}
-
-	private async loadMainMenuSnapshot(step: string): Promise<MainMenuSnapshot> {
-		const response = await this.transport.request({
-			path: "/faces/MainMenuPage.xhtml",
-			method: "GET",
-			headers: { Referer: `${this.baseUrl}/` },
-			cache: false,
-		});
-
-		assertNavigationSuccess(step, response.status, response.url);
 
 		return {
 			body: response.body,
-			formBody: response.body,
-			viewState: parseViewState(response.body),
-			idInit: parseIdInit(response.body),
 		};
 	}
 
-	private async loadGroupedPlanningsMenuSnapshot(step: string): Promise<MainMenuSnapshot> {
-		const mainMenu = await this.loadMainMenuSnapshot(`${step}:loadMainMenu`);
-		const planningsSubmenuId = parseSubmenuId(mainMenu.body, "Les plannings");
-		const planningsMenu = await this.postMainMenuSubmenu(
-			mainMenu,
-			planningsSubmenuId,
-			`${step}:openPlanningsMenu`,
-		);
-		const groupedSubmenuId = parseSubmenuId(planningsMenu.body, "Plannings Groupés par Promotion");
-
-		return this.postMainMenuSubmenu(
-			planningsMenu,
-			groupedSubmenuId,
-			`${step}:openGroupedPlanningsMenu`,
-		);
-	}
-
-	private async postMainMenuSubmenu(
-		menu: MainMenuSnapshot,
-		submenuId: string,
-		step: string,
-	): Promise<MainMenuSnapshot> {
-		const command = parseChargerSousMenuCommand(menu.formBody);
-		const postData = createUrlSearchParamsFromForm(menu.formBody, command.formId);
-		overlayParams(postData, {
-			"javax.faces.partial.ajax": "true",
-			"javax.faces.source": command.sourceId,
-			"javax.faces.partial.execute": command.executeId,
-			"javax.faces.partial.render": command.renderId,
-			[command.sourceId]: command.sourceId,
-			"webscolaapp.Sidebar.ID_SUBMENU": submenuId,
-			"javax.faces.ViewState": menu.viewState,
-		});
-
-		const response = await this.transport.request({
-			path: "/faces/MainMenuPage.xhtml",
-			method: "POST",
-			body: postData,
-			headers: PRIMEFACES_AJAX_HEADERS,
-			cache: false,
-		});
-
-		assertNavigationSuccess(step, response.status, response.url);
-
-		return {
-			body: response.body,
-			formBody: menu.formBody,
-			viewState: parseViewState(response.body),
-			idInit: menu.idInit,
-		};
-	}
-
-	private async openChoixPlanning(menuId: string, step: string): Promise<ChoixPlanningSnapshot> {
-		const mainMenu = await this.loadMainMenuSnapshot(`${step}:loadMainMenu`);
-		const postData = createUrlSearchParamsFromForm(mainMenu.body);
-		overlayParams(postData, {
-			"javax.faces.ViewState": mainMenu.viewState,
-			"form:sidebar": "form:sidebar",
-			"form:sidebar_menuid": menuId,
-		});
-
-		const response = await this.transport.request({
-			path: "/faces/MainMenuPage.xhtml",
-			method: "POST",
-			body: postData,
-			headers: FORM_URLENCODED_HEADERS,
-			cache: false,
-		});
-
-		assertNavigationSuccess(`${step}:postSidebar`, response.status, response.url);
-
-		if (response.url.endsWith("/faces/ChoixPlanning.xhtml")) {
-			return {
-				body: response.body,
-				idInit: mainMenu.idInit,
-			};
-		}
-
-		const choixResponse = await this.transport.request({
-			path: "/faces/ChoixPlanning.xhtml",
-			method: "GET",
-			headers: { Referer: `${this.baseUrl}/faces/ChoixPlanning.xhtml` },
-			cache: false,
-		});
-
-		assertNavigationSuccess(`${step}:loadChoixPlanning`, choixResponse.status, choixResponse.url);
-
-		return {
-			body: choixResponse.body,
-			idInit: mainMenu.idInit,
-		};
-	}
-
-	private async openSelectedPlanning(
-		choixPlanningBody: string,
-		planningId: string,
-		step: string,
-	): Promise<string> {
-		const dataTableId = parseChoixPlanningDataTableId(choixPlanningBody);
-		const buttonId = parseVoirPlanningButtonId(choixPlanningBody);
-		const postData = createUrlSearchParamsFromForm(choixPlanningBody);
-		overlayParams(postData, {
-			"javax.faces.ViewState": parseViewState(choixPlanningBody),
-			[`${dataTableId}_checkbox`]: "on",
-			[`${dataTableId}_selection`]: planningId,
-			[buttonId]: "",
-		});
-
-		const response = await this.transport.request({
-			path: "/faces/ChoixPlanning.xhtml",
-			method: "POST",
-			body: postData,
-			headers: FORM_URLENCODED_HEADERS,
-			cache: false,
-		});
-
-		assertNavigationSuccess(step, response.status, response.url);
-		if (!containsPlanningScheduleWidget(response.body)) {
-			const planningResponse = await this.transport.request({
-				path: "/faces/Planning.xhtml",
-				method: "GET",
-				headers: { Referer: `${this.baseUrl}/faces/ChoixPlanning.xhtml` },
-				cache: false,
-			});
-
-			assertNavigationSuccess(
-				`${step}:loadPlanning`,
-				planningResponse.status,
-				planningResponse.url,
-			);
-			if (!containsPlanningScheduleWidget(planningResponse.body)) {
-				throw createAurionError(
-					"AURION_PARSING_ERROR",
-					"La sélection du planning groupé n'a pas ouvert la page calendrier Aurion.",
-					{
-						parser: "openSelectedPlanning",
-						planningId,
-						dataTableId,
-						buttonId,
-						selectionField: `${dataTableId}_selection`,
-						selectionPost: {
-							status: response.status,
-							initialStatus: response.initialStatus,
-							url: response.url,
-							title: extractPageTitle(response.body),
-							bodySnippet: response.body.slice(0, 500),
-						},
-						fallbackGet: {
-							status: planningResponse.status,
-							initialStatus: planningResponse.initialStatus,
-							url: planningResponse.url,
-							title: extractPageTitle(planningResponse.body),
-							bodySnippet: planningResponse.body.slice(0, 500),
-						},
-					},
-				);
+	private async withNavigationRetry<TValue>(
+		nodeId: AurionNavigationNodeId,
+		action: () => Promise<TValue>,
+	): Promise<TValue> {
+		try {
+			return await action();
+		} catch (error: unknown) {
+			if (!isAurionError(error) || !isRecoverableNavigationError(error.code)) {
+				throw error;
 			}
 
-			return planningResponse.body;
+			this.invalidateNavigationNode(nodeId);
+			this.invalidateNavigationNode("root");
+
+			return action();
+		}
+	}
+
+	private readNavigationNode<TState>(id: AurionNavigationNodeId): TState | null {
+		const node = this.navigationNodes.get(id);
+		if (!node) {
+			return null;
 		}
 
-		return response.body;
+		return node.state as TState;
+	}
+
+	private writeNavigationNode<TState>(
+		id: AurionNavigationNodeId,
+		parentId: AurionNavigationNodeId | null,
+		state: TState,
+	): void {
+		this.navigationNodes.set(id, {
+			id,
+			parentId,
+			createdAt: Date.now(),
+			state,
+		});
+	}
+
+	private invalidateNavigationNode(id: AurionNavigationNodeId): void {
+		this.navigationNodes.delete(id);
+
+		for (const node of Array.from(this.navigationNodes.values())) {
+			if (node.parentId === id) {
+				this.invalidateNavigationNode(node.id);
+			}
+		}
 	}
 
 	private async readCachedValue<TValue>(key: string): Promise<TValue | null> {
@@ -1209,9 +1314,53 @@ export class AurionSession {
 	private getSessionCacheScope(): string {
 		return `${this.baseUrl}:${this.username}`;
 	}
+
+	private attachEventMethods(
+		events: Array<Omit<AurionPlanningEvent, "getDetails">>,
+	): AurionPlanningEvent[] {
+		return events.map((event) => ({
+			...event,
+			getDetails: () => this.getEventDetails(event.id),
+		}));
+	}
 }
 
 /** État intermédiaire propagé entre les étapes de navigation Aurion. */
+interface RootNavigationState {
+	viewState: string;
+	idInit: string;
+	formId?: string;
+	body?: string;
+}
+
+interface MainMenuSnapshot {
+	body: string;
+	formBody: string;
+	viewState: string;
+	idInit: string;
+}
+
+interface ChoixPlanningSnapshot {
+	body: string;
+	idInit: string;
+	viewState: string;
+}
+
+/** État du menu Notes résolu depuis la racine de session. */
+interface GradesMenuNavigationState {
+	viewState: string;
+	formId: string;
+	menuId: string;
+	idInit: string;
+}
+
+/** État du menu Planning résolu depuis la racine de session. */
+interface PlanningMenuNavigationState {
+	viewState: string;
+	menuId: string;
+	idInit: string;
+}
+
 interface GradesNavigationState {
 	viewState: string;
 	formId: string;
@@ -1226,36 +1375,8 @@ interface PlanningNavigationState {
 	menuId: string;
 	idInit: string;
 	formIdPlanning: string;
-	formId?: string;
-	mainMenuBody?: string;
-	planningPageBody?: string;
-}
-
-interface MainMenuSnapshot {
-	body: string;
-	formBody: string;
-	viewState: string;
-	idInit: string;
-}
-
-interface ChargerSousMenuCommand {
-	sourceId: string;
-	formId: string;
-	executeId: string;
-	renderId: string;
-}
-
-interface ChoixPlanningSnapshot {
-	body: string;
-	idInit: string;
-}
-
-interface PlanningRequestContext {
-	startTimestamp: number;
-	endTimestamp: number;
-	today: string;
-	week: string;
-	year: string;
+	dateInput?: string | null;
+	weekInput?: string | null;
 }
 
 /** État intermédiaire utilisé pendant la navigation de la section absences. */
@@ -1264,6 +1385,22 @@ interface AbsencesNavigationState {
 	formId: string;
 	menuId: string;
 	idInit: string;
+}
+
+type AurionNavigationNodeId =
+	| "root"
+	| "gradesMenu"
+	| "gradesPage"
+	| "planningMenu"
+	| "planningPage"
+	| "absencesMenu"
+	| "absencesPage";
+
+interface AurionNavigationNode {
+	id: AurionNavigationNodeId;
+	parentId: AurionNavigationNodeId | null;
+	createdAt: number;
+	state: unknown;
 }
 
 /**
@@ -1290,6 +1427,127 @@ function assertNavigationSuccess(step: string, status: number, url: string): voi
 			expected: "2xx",
 		},
 	);
+}
+
+function requireRootFormId(state: RootNavigationState): string {
+	if (state.formId) {
+		return state.formId;
+	}
+
+	throw createAurionError(
+		"AURION_NAVIGATION_ERROR",
+		"Identifiant de formulaire racine Aurion indisponible.",
+		{
+			parser: "requireRootFormId",
+		},
+	);
+}
+
+function requireRootBody(state: RootNavigationState): string {
+	if (state.body) {
+		return state.body;
+	}
+
+	throw createAurionError("AURION_NAVIGATION_ERROR", "Corps HTML racine Aurion indisponible.", {
+		parser: "requireRootBody",
+	});
+}
+
+function tryParseSubmenuId(body: string, keyword: string): string | null {
+	try {
+		return parseSubmenuId(body, keyword);
+	} catch (error: unknown) {
+		if (isAurionError(error) && error.code === "AURION_PARSING_ERROR") {
+			return null;
+		}
+
+		throw error;
+	}
+}
+
+function parseViewStateOrFallback(body: string, fallback: string): string {
+	try {
+		return parseViewState(body);
+	} catch (error: unknown) {
+		if (isAurionError(error)) {
+			return fallback;
+		}
+
+		throw error;
+	}
+}
+
+function parseIdInitOrFallback(body: string, fallback: string): string {
+	try {
+		return parseIdInit(body);
+	} catch (error: unknown) {
+		if (isAurionError(error)) {
+			return fallback;
+		}
+
+		throw error;
+	}
+}
+
+function tryParseFormIdPlanning(body: string): string | null {
+	try {
+		return parseFormIdPlanning(body);
+	} catch (error: unknown) {
+		if (isAurionError(error) && error.code === "AURION_PARSING_ERROR") {
+			return null;
+		}
+
+		throw error;
+	}
+}
+
+function parseChoixPlanningTableId(body: string): string {
+	const selectionMatch =
+		body.match(/\bname=["'](form:[^"']+)_selection["']/i) ??
+		body.match(/\bid=["'](form:[^"']+)_selection["']/i) ??
+		body.match(/\bname=["'](form:[^"']+)_checkbox["']/i) ??
+		body.match(/\bid=["'](form:[^"']+)_checkbox["']/i) ??
+		body.match(/\bname=["'](form:[^"']+)_reflowDD["']/i) ??
+		body.match(/\bid=["'](form:[^"']+)_reflowDD["']/i);
+
+	if (selectionMatch?.[1]) {
+		return selectionMatch[1];
+	}
+
+	throw createAurionError(
+		"AURION_PARSING_ERROR",
+		"Identifiant de table ChoixPlanning Aurion introuvable.",
+		{
+			parser: "parseChoixPlanningTableId",
+		},
+	);
+}
+
+function parseChoixPlanningSubmitButtonId(body: string): string {
+	for (const button of body.matchAll(/<button\b[\s\S]*?<\/button>/gi)) {
+		const markup = button[0];
+		if (!markup.includes("Voir planning")) {
+			continue;
+		}
+
+		const id =
+			markup.match(/\bname=["']([^"']+)["']/i)?.[1] ?? markup.match(/\bid=["']([^"']+)["']/i)?.[1];
+		if (id) {
+			return id;
+		}
+	}
+
+	throw createAurionError(
+		"AURION_PARSING_ERROR",
+		"Bouton Voir planning ChoixPlanning Aurion introuvable.",
+		{
+			parser: "parseChoixPlanningSubmitButtonId",
+		},
+	);
+}
+
+function isRecoverableNavigationError(code: string): boolean {
+	return code === "AURION_NAVIGATION_ERROR" || code === "AURION_PARSING_ERROR";
 }
 
 /**
@@ -1328,489 +1586,13 @@ function createFormFocusAndInputFields(
 	};
 }
 
-/**
- * Extrait la commande PrimeFaces `chargerSousMenu` de la page MainMenuPage.
- *
- * Cette commande indique les identifiants nécessaires pour soumettre une requête AJAX
- * permettant d'ouvrir un sous-menu latéral.
- *
- * @param body Le corps HTML de la page.
- * @returns Les identifiants `sourceId`, `formId`, `executeId` et `renderId` requis.
- * @throws {AurionError} Si la commande est introuvable ou mal formée.
- */
-function parseChargerSousMenuCommand(body: string): ChargerSousMenuCommand {
-	const commandIndex = body.indexOf("chargerSousMenu");
-	const primeFacesIndex =
-		commandIndex === -1
-			? body.indexOf("PrimeFaces.ab")
-			: body.indexOf("PrimeFaces.ab", commandIndex);
-	if (primeFacesIndex === -1) {
-		throw createAurionError(
-			"AURION_PARSING_ERROR",
-			"Impossible de localiser la commande PrimeFaces chargerSousMenu.",
-			{ parser: "parseChargerSousMenuCommand" },
-		);
-	}
+function parseInputValue(body: string, name: string): string | null {
+	const escapedName = name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = body.match(
+		new RegExp(`<input[^>]*name=["']${escapedName}["'][^>]*value=["']([^"']*)["']`, "i"),
+	);
 
-	const config = body.slice(primeFacesIndex, primeFacesIndex + 3000);
-	const sourceId = parsePrimeFacesStringConfig(config, "s", "parseChargerSousMenuCommand");
-	const formId = parsePrimeFacesStringConfig(config, "f", "parseChargerSousMenuCommand");
-	const executeId = parsePrimeFacesStringConfig(config, "p", "parseChargerSousMenuCommand");
-	const renderId = parsePrimeFacesStringConfig(config, "u", "parseChargerSousMenuCommand");
-
-	return { sourceId, formId, executeId, renderId };
-}
-
-/**
- * Parse une valeur de configuration sous forme de chaîne de caractères dans un appel `PrimeFaces.ab`.
- *
- * @param config L'extrait de code JavaScript contenant la configuration.
- * @param key La clé à rechercher (ex: `s`, `f`, `p`, `u`).
- * @param parser Nom du parseur pour le rapport d'erreur.
- * @returns La valeur associée à la clé.
- * @throws {AurionError} Si la clé est introuvable.
- */
-function parsePrimeFacesStringConfig(config: string, key: string, parser: string): string {
-	const match = config.match(new RegExp(`${key}:"([^"]+)"`));
-	if (!match?.[1]) {
-		throw createAurionError("AURION_PARSING_ERROR", `Champ PrimeFaces ${key} introuvable.`, {
-			parser,
-			key,
-			configSnippet: config.slice(0, 280),
-		});
-	}
-
-	return match[1];
-}
-
-/**
- * Construit un objet `URLSearchParams` à partir des champs d'un formulaire HTML.
- *
- * Cette fonction extrait les champs `input`, `textarea` et `select` (en respectant l'état
- * de sélection pour les cases à cocher, boutons radio et menus déroulants) afin de
- * reproduire la sérialisation JSF native.
- *
- * @param body Le corps HTML contenant le formulaire.
- * @param formId L'identifiant (attribut `id` ou `name`) du formulaire cible.
- * @returns Les paramètres encodés prêts à être envoyés en POST.
- * @throws {AurionError} Si le formulaire est introuvable.
- */
-function createUrlSearchParamsFromForm(body: string, formId = "form"): URLSearchParams {
-	const formBlock = extractFormBlock(body, formId);
-	const params = new URLSearchParams();
-	params.set(formId, formId);
-
-	for (const input of extractTags(formBlock, "input")) {
-		const attributes = parseHtmlAttributes(input);
-		const name = attributes.get("name");
-		if (!name) {
-			continue;
-		}
-
-		const type = attributes.get("type")?.toLowerCase() ?? "text";
-		if ((type === "checkbox" || type === "radio") && !attributes.has("checked")) {
-			continue;
-		}
-
-		params.set(name, attributes.get("value") ?? "");
-	}
-
-	for (const textarea of extractElementBlocks(formBlock, "textarea")) {
-		const openingTagEnd = textarea.indexOf(">");
-		const openingTag = textarea.slice(0, openingTagEnd + 1);
-		const attributes = parseHtmlAttributes(openingTag);
-		const name = attributes.get("name");
-		if (!name) {
-			continue;
-		}
-
-		const value = textarea.slice(openingTagEnd + 1, textarea.lastIndexOf("</textarea>"));
-		params.set(name, decodeHtmlAttribute(value));
-	}
-
-	for (const select of extractElementBlocks(formBlock, "select")) {
-		const openingTagEnd = select.indexOf(">");
-		const openingTag = select.slice(0, openingTagEnd + 1);
-		const attributes = parseHtmlAttributes(openingTag);
-		const name = attributes.get("name");
-		if (!name) {
-			continue;
-		}
-
-		const option = findSelectedOption(select) ?? findFirstOption(select);
-		params.set(name, option ?? "");
-	}
-
-	return params;
-}
-
-/**
- * Extrait un bloc HTML complet représentant un formulaire donné, y compris son contenu.
- *
- * @param body Le document HTML.
- * @param formId L'identifiant ou le nom du formulaire.
- * @returns La balise de début du formulaire jusqu'à la balise de fin incluse.
- * @throws {AurionError} Si le formulaire n'est pas trouvé ou s'il s'agit d'une réponse partielle incomplète.
- */
-function extractFormBlock(body: string, formId: string): string {
-	const formOpenings = Array.from(body.matchAll(/<form\b[^>]*>/gi));
-	for (const opening of formOpenings) {
-		if (typeof opening.index !== "number") {
-			continue;
-		}
-
-		const attributes = parseHtmlAttributes(opening[0]);
-		if (attributes.get("id") !== formId && attributes.get("name") !== formId) {
-			continue;
-		}
-
-		const closingIndex = body.indexOf("</form>", opening.index);
-		if (closingIndex !== -1) {
-			return body.slice(opening.index, closingIndex + "</form>".length);
-		}
-	}
-
-	const firstForm = formOpenings.at(0);
-	if (formId === "form" && firstForm && typeof firstForm.index === "number") {
-		const closingIndex = body.indexOf("</form>", firstForm.index);
-		if (closingIndex !== -1) {
-			return body.slice(firstForm.index, closingIndex + "</form>".length);
-		}
-	}
-
-	if (body.includes("<partial-response")) {
-		throw createAurionError(
-			"AURION_PARSING_ERROR",
-			"Réponse partielle JSF reçue sans formulaire complet sérialisable.",
-			{
-				parser: "extractFormBlock",
-				formId,
-			},
-		);
-	}
-
-	{
-		throw createAurionError(
-			"AURION_PARSING_ERROR",
-			"Formulaire JSF introuvable dans la page Aurion.",
-			{
-				parser: "extractFormBlock",
-				formId,
-			},
-		);
-	}
-}
-
-/**
- * Analyse les attributs d'une balise HTML ouvrante.
- *
- * @param tag La balise ouvrante (ex: `<input type="text" name="foo">`).
- * @returns Une Map associant chaque nom d'attribut en minuscules à sa valeur décodée.
- */
-function parseHtmlAttributes(tag: string): Map<string, string> {
-	const attributes = new Map<string, string>();
-	for (const match of tag.matchAll(/([:\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g)) {
-		const name = match[1];
-		if (!name || name === tag.match(/^<\/?([\w-]+)/)?.[1]) {
-			continue;
-		}
-
-		attributes.set(name.toLowerCase(), decodeHtmlAttribute(match[2] ?? match[3] ?? match[4] ?? ""));
-	}
-
-	return attributes;
-}
-
-/**
- * Trouve la valeur de la première option explicitement sélectionnée dans un `<select>`.
- *
- * @param selectBlock Le bloc HTML du menu déroulant.
- * @returns La valeur de l'option (attribut `value` ou contenu texte), ou `null` si aucune n'est sélectionnée.
- */
-function findSelectedOption(selectBlock: string): string | null {
-	for (const option of extractElementBlocks(selectBlock, "option")) {
-		const openingTag = option.slice(0, option.indexOf(">") + 1);
-		const attributes = parseHtmlAttributes(openingTag);
-		if (attributes.has("selected")) {
-			return attributes.get("value") ?? decodeHtmlAttribute(stripTags(option));
-		}
-	}
-
-	return null;
-}
-
-/**
- * Trouve la valeur de la toute première option d'un `<select>`.
- *
- * @param selectBlock Le bloc HTML du menu déroulant.
- * @returns La valeur de la première option, ou `null` si le `<select>` est vide.
- */
-function findFirstOption(selectBlock: string): string | null {
-	const option = extractElementBlocks(selectBlock, "option").at(0);
-	if (!option) {
-		return null;
-	}
-
-	const openingTag = option.slice(0, option.indexOf(">") + 1);
-	const attributes = parseHtmlAttributes(openingTag);
-
-	return attributes.get("value") ?? decodeHtmlAttribute(stripTags(option));
-}
-
-/**
- * Remplace ou ajoute des paramètres dans une instance `URLSearchParams`.
- *
- * @param params Les paramètres existants à muter.
- * @param values Un objet associatif clé-valeur contenant les paramètres à injecter.
- */
-function overlayParams(params: URLSearchParams, values: Record<string, string>): void {
-	for (const [key, value] of Object.entries(values)) {
-		params.set(key, value);
-	}
-}
-
-/**
- * Identifie l'identifiant racine (ex: `form:j_idt181`) du composant data-table contenant les plannings disponibles.
- *
- * @param body Le code HTML de la page `ChoixPlanning.xhtml`.
- * @returns L'identifiant de la table JSF.
- * @throws {AurionError} Si l'identifiant est introuvable.
- */
-function parseChoixPlanningDataTableId(body: string): string {
-	const match = body.match(/id="([^"]+)_data"[^>]*class="[^"]*ui-datatable-data/);
-	if (!match?.[1]) {
-		throw createAurionError(
-			"AURION_PARSING_ERROR",
-			"Table de sélection des plannings introuvable.",
-			{
-				parser: "parseChoixPlanningDataTableId",
-			},
-		);
-	}
-
-	return match[1];
-}
-
-/**
- * Extrait l'identifiant (id ou name) du bouton "Voir planning" à partir de son libellé visuel.
- *
- * @param body Le code HTML de la page `ChoixPlanning.xhtml`.
- * @returns L'identifiant du bouton JSF.
- * @throws {AurionError} Si le bouton n'est pas présent dans le DOM.
- */
-function parseVoirPlanningButtonId(body: string): string {
-	for (const button of extractElementBlocks(body, "button")) {
-		if (normalizeWhitespace(stripTags(button)) !== "Voir planning") {
-			continue;
-		}
-
-		const openingTag = button.slice(0, button.indexOf(">") + 1);
-		const attributes = parseHtmlAttributes(openingTag);
-		const id = attributes.get("id") ?? attributes.get("name");
-		if (id) {
-			return id;
-		}
-	}
-
-	throw createAurionError("AURION_PARSING_ERROR", "Bouton Voir planning introuvable.", {
-		parser: "parseVoirPlanningButtonId",
-	});
-}
-
-/**
- * Détermine si le corps HTML contient le composant PrimeFaces Schedule (le calendrier).
- *
- * @param body Le code HTML (ou XML partiel) à vérifier.
- * @returns `true` si le widget de calendrier est présent, `false` sinon.
- */
-function containsPlanningScheduleWidget(body: string): boolean {
-	return /PrimeFaces\.cw\("Schedule","schedule",\{id:"[^"]+"/.test(body);
-}
-
-/**
- * Extrait le titre de la page contenu dans la balise `<title>`.
- *
- * @param body Le code HTML de la page.
- * @returns Le titre décodé et nettoyé, ou `null` si introuvable.
- */
-function extractPageTitle(body: string): string | null {
-	const match = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-	if (!match?.[1]) {
-		return null;
-	}
-
-	return decodeHtmlAttribute(stripTags(match[1]));
-}
-
-/**
- * Construit le contexte de requête nécessaire pour extraire les événements de planning
- * depuis la page calendrier.
- *
- * Cette fonction s'appuie sur une fenêtre temporelle explicite si elle est fournie,
- * ou calcule une fenêtre par défaut reflétant la vue mensuelle visible du calendrier
- * d'après l'état du formulaire rendu.
- *
- * @param window Fenêtre temporelle explicite (si précisée par l'appelant).
- * @param planningPageBody Le corps HTML de la page Planning (si déjà chargée).
- * @returns Le contexte de requête contenant timestamps, numéro de semaine et dates JSF.
- */
-function createPlanningRequestContext(
-	window: { startTimestamp: number; endTimestamp: number } | null,
-	planningPageBody: string | undefined,
-): PlanningRequestContext {
-	if (window) {
-		const planningDate = new Date(window.startTimestamp);
-		return {
-			startTimestamp: window.startTimestamp,
-			endTimestamp: window.endTimestamp,
-			today: planningDate.toLocaleDateString("fr-FR", {
-				day: "2-digit",
-				month: "2-digit",
-				year: "numeric",
-			}),
-			week: String(getWeekNumber(planningDate)).padStart(2, "0"),
-			year: String(planningDate.getFullYear()),
-		};
-	}
-
-	if (planningPageBody) {
-		const params = createUrlSearchParamsFromForm(planningPageBody);
-		const dateInput = params.get("form:date_input");
-		const weekInput = params.get("form:week");
-		if (dateInput && weekInput) {
-			const [week, year] = weekInput.split("-");
-			if (week && year) {
-				const date = parseDateOrThrow(
-					planningPageBody,
-					"createPlanningRequestContext",
-					"form:date_input",
-					dateInput,
-				);
-				const visibleMonthRange = createMonthVisiblePlanningRange(date);
-
-				return {
-					startTimestamp: visibleMonthRange.startTimestamp,
-					endTimestamp: visibleMonthRange.endTimestamp,
-					today: dateInput,
-					week,
-					year,
-				};
-			}
-		}
-	}
-
-	const fallbackWindow = resolvePlanningWindow();
-	const fallbackDate = new Date(fallbackWindow.startTimestamp);
-	return {
-		startTimestamp: fallbackWindow.startTimestamp,
-		endTimestamp: fallbackWindow.endTimestamp,
-		today: fallbackDate.toLocaleDateString("fr-FR", {
-			day: "2-digit",
-			month: "2-digit",
-			year: "numeric",
-		}),
-		week: String(getWeekNumber(fallbackDate)).padStart(2, "0"),
-		year: String(fallbackDate.getFullYear()),
-	};
-}
-
-/**
- * Calcule l'intervalle temporel affiché dans une vue mois PrimeFaces classique
- * en entourant le début du mois courant.
- *
- * @param date Une date appartenant au mois cible.
- * @returns Les horodatages de début (souvent le dimanche précédent) et de fin (~40 jours plus tard).
- */
-function createMonthVisiblePlanningRange(date: Date): {
-	startTimestamp: number;
-	endTimestamp: number;
-} {
-	const firstDayOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
-	const visibleStart = new Date(firstDayOfMonth);
-	visibleStart.setDate(firstDayOfMonth.getDate() - firstDayOfMonth.getDay());
-
-	const visibleEnd = new Date(visibleStart);
-	visibleEnd.setDate(visibleStart.getDate() + 40);
-
-	return {
-		startTimestamp: visibleStart.getTime(),
-		endTimestamp: visibleEnd.getTime(),
-	};
-}
-
-/**
- * Construit un résumé lisible de l'état des principaux champs JSF et PrimeFaces
- * (date, identifiants AJAX) soumis dans une requête Planning.
- *
- * Utile uniquement pour la génération de rapports d'erreurs en cas d'échec d'extraction.
- *
- * @param params Les paramètres de la requête POST.
- * @returns Un dictionnaire associant chaque clé d'intérêt à sa valeur, ou `false` si absente.
- */
-function summarizePlanningFormFields(params: URLSearchParams): Record<string, string | boolean> {
-	const summary: Record<string, string | boolean> = {};
-	for (const key of [
-		"javax.faces.partial.ajax",
-		"javax.faces.source",
-		"javax.faces.partial.execute",
-		"javax.faces.partial.render",
-		"form",
-		"form:largeurDivCenter",
-		"form:idInit",
-		"form:date_input",
-		"form:week",
-		"form:offsetFuseauNavigateur",
-		"form:onglets_activeIndex",
-		"form:onglets_scrollState",
-		"javax.faces.ViewState",
-	]) {
-		summary[key] = params.has(key) ? (params.get(key) ?? "") : false;
-	}
-
-	const sourceId = params.get("javax.faces.source");
-	if (sourceId) {
-		summary[`${sourceId}_start`] = params.get(`${sourceId}_start`) ?? false;
-		summary[`${sourceId}_end`] = params.get(`${sourceId}_end`) ?? false;
-		summary[`${sourceId}_view`] = params.get(`${sourceId}_view`) ?? false;
-	}
-
-	return summary;
-}
-
-/**
- * Extrait une portion de code HTML entourant l'identifiant du widget calendrier (schedule),
- * afin d'aider au diagnostic lors de la levée d'erreurs d'extraction.
- *
- * @param body Le document HTML de la page Planning.
- * @param sourceId L'identifiant du widget ciblé.
- * @returns Le fragment HTML textuel entourant l'élément, ou `null` s'il est introuvable.
- */
-function extractScheduleWidgetSnippet(body: string, sourceId: string): string | null {
-	const index = body.indexOf(sourceId);
-	if (index === -1) {
-		return null;
-	}
-
-	return body.slice(Math.max(0, index - 220), Math.min(body.length, index + 500));
-}
-
-/**
- * Remplace de manière basique quelques entités HTML classiques pour restaurer un texte brut.
- *
- * NOTE: Destiné exclusivement au traitement léger des textes internes. Ne gère pas
- * la spécification HTML de manière exhaustive.
- *
- * @param input La chaîne de caractères à décoder.
- * @returns La chaîne convertie.
- */
-function decodeHtmlAttribute(input: string): string {
-	return input
-		.replaceAll("&nbsp;", " ")
-		.replaceAll("&amp;", "&")
-		.replaceAll("&lt;", "<")
-		.replaceAll("&gt;", ">")
-		.replaceAll("&quot;", '"')
-		.replaceAll("&#39;", "'");
+	return match?.[1] ?? null;
 }
 
 /**
@@ -1883,13 +1665,13 @@ function serializePlanningWindow(window: { startTimestamp: number; endTimestamp:
 	return `${start}:${end}`;
 }
 
-function filterPlanningEventsByWindow<T extends { start: Date; end: Date }>(
-	events: T[],
+function filterPlanningEventsByWindow(
+	events: AurionPlanningEvent[],
 	window: {
 		startTimestamp: number;
 		endTimestamp: number;
 	},
-): T[] {
+): AurionPlanningEvent[] {
 	return events.filter((event) => {
 		const eventStart = event.start.getTime();
 		const eventEnd = event.end.getTime();

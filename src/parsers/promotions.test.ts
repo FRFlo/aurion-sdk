@@ -1,45 +1,56 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseAvailablePlannings } from "./promotions";
+import { parseAvailablePlannings, parseMenuChildren, parseSubmenuId } from "./promotions";
 
-describe("parseAvailablePlannings", () => {
-	test("extracts every planning column from ChoixPlanning rows", () => {
+describe("promotion planning parsers", () => {
+	test("parseSubmenuId resolves the grouped plannings menu entry", () => {
 		const body = `
-<table class="ui-datatable"><thead><tr>
-	<th>Sélectionner</th><th>Code</th><th>Libellé</th><th>Fin de validité</th><th>Libellé</th>
-</tr></thead><tbody>
-	<tr data-rk="rk-1">
-		<td><input type="checkbox" /></td>
-		<td>2526_ISEN_AP3</td>
-		<td>Promotion 3ème année ISEN Apprentissage 2025-2026</td>
-		<td>31/08/2026</td>
-		<td>Promotion</td>
-	</tr>
-	<tr data-rk="rk-2">
-		<td><input type="checkbox" /></td>
-		<td>2526_ISEN_AP3_GR1</td>
-		<td>AP3 - Groupe 1</td>
-		<td>31/08/2026</td>
-		<td>Planning</td>
-	</tr>
-</tbody></table>`;
+			<a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_3131476'})">
+				<span>Plannings Groupés par Promotion</span>
+			</a>
+		`;
+
+		expect(parseSubmenuId(body, "Plannings Groupés par Promotion")).toBe("submenu_3131476");
+	});
+
+	test("parseMenuChildren returns direct submenu and item entries", () => {
+		const body = `
+			<li id="submenu_parent">
+				<a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_child'})"><span>ISEN</span></a>
+				<ul><li id="submenu_child"></li></ul>
+				<a onclick="PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'3_0_6_1'})"><span>AP3</span></a>
+			</li>
+		`;
+
+		expect(parseMenuChildren(body, "submenu_parent")).toEqual([
+			{
+				type: "submenu",
+				id: "submenu_child",
+				name: "ISEN",
+				isLoaded: true,
+			},
+			{
+				type: "item",
+				id: "3_0_6_1",
+				name: "AP3",
+			},
+		]);
+	});
+
+	test("parseAvailablePlannings extracts planning rows", () => {
+		const body = `
+			<table><tbody>
+				<tr data-rk="60288885">
+					<td><input name="form:j_idt181_checkbox" value="60288885" /></td>
+					<td>ISEN AP3</td>
+				</tr>
+			</tbody></table>
+		`;
 
 		expect(parseAvailablePlannings(body)).toEqual([
 			{
-				id: "rk-1",
-				name: "Promotion 3ème année ISEN Apprentissage 2025-2026",
-				code: "2526_ISEN_AP3",
-				label: "Promotion 3ème année ISEN Apprentissage 2025-2026",
-				validityEnd: "31/08/2026",
-				kind: "Promotion",
-			},
-			{
-				id: "rk-2",
-				name: "AP3 - Groupe 1",
-				code: "2526_ISEN_AP3_GR1",
-				label: "AP3 - Groupe 1",
-				validityEnd: "31/08/2026",
-				kind: "Planning",
+				id: "60288885",
+				name: "ISEN AP3",
 			},
 		]);
 	});
