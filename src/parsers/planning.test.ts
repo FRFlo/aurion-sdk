@@ -1,8 +1,39 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseEventDetails } from "./planning";
+import { parseEventDetails, parsePlanningEvents } from "./planning";
 
 describe("parseEventDetails", () => {
+	test("parses the saved empty planning events partial response", async () => {
+		const body = await Bun.file("aurion-cursus-161-response-body.txt").text();
+
+		expect(parsePlanningEvents(body)).toEqual([]);
+	});
+
+	test("parses populated planning events whose titles contain square brackets", () => {
+		const payload = JSON.stringify({
+			events: [
+				{
+					id: "66383287",
+					title: "J104_COURS\n\n[ADI1] Mécanique du solide",
+					start: "2026-05-26T13:30:00+0200",
+					end: "2026-05-26T16:30:00+0200",
+					allDay: false,
+					editable: true,
+					className: "COURS_TD",
+				},
+			],
+		});
+		const body = `<?xml version='1.0' encoding='UTF-8'?>
+<partial-response id="j_id1"><changes><update id="form:j_idt118"><![CDATA[${payload}]]></update></changes></partial-response>`;
+
+		const events = parsePlanningEvents(body);
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.id).toBe("66383287");
+		expect(events[0]?.title).toContain("[ADI1]");
+		expect(events[0]?.type).toBe("COURS_TD");
+	});
+
 	test("parses the real Aurion event detail partial response", async () => {
 		const body = await Bun.file("response-getEventDetails.xml").text();
 

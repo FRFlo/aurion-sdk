@@ -49,23 +49,7 @@ export function parseSidebarMenuIdForMonPlanning(body: string): string {
  * @throws {AurionError} Si le payload JSON est absent, invalide ou contient des événements mal formés.
  */
 export function parsePlanningEvents(body: string): Array<Omit<AurionPlanningEvent, "getDetails">> {
-	const payloadMatch =
-		body.match(/(\[\{"id"[\s\S]*?}])/) ?? body.match(/"events"\s*:\s*(\[\{"id"[\s\S]*?}])/);
-	if (!payloadMatch?.[1]) {
-		throwParsingError(body, "parsePlanningEvents", "Planning JSON payload not found");
-	}
-
-	const payload = payloadMatch[1];
-	let parsed: unknown;
-
-	try {
-		parsed = JSON.parse(payload);
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : "Unknown JSON parsing error";
-		throwParsingError(body, "parsePlanningEvents", `Invalid planning JSON payload: ${reason}`, {
-			payloadSnippet: payload.slice(0, 280),
-		});
-	}
+	const { payload, parsed } = parsePlanningEventsPayload(body);
 
 	if (!Array.isArray(parsed)) {
 		throwParsingError(body, "parsePlanningEvents", "Planning payload is not an array", {
@@ -100,6 +84,54 @@ export function parsePlanningEvents(body: string): Array<Omit<AurionPlanningEven
 			type: event.className,
 		};
 	});
+}
+
+function parsePlanningEventsPayload(body: string): { payload: string; parsed: unknown } {
+	const trimmedBody = body.trim();
+	const directParsed = parsePlanningJsonCandidate(trimmedBody);
+	if (directParsed !== null) {
+		return directParsed;
+	}
+
+	for (const cdata of body.matchAll(/<!\[CDATA\[([\s\S]*?)]]>/g)) {
+		const candidate = cdata[1]?.trim();
+		if (!candidate?.includes('"events"')) {
+			continue;
+		}
+
+		const parsed = parsePlanningJsonCandidate(candidate);
+		if (parsed !== null) {
+			return parsed;
+		}
+	}
+
+	throwParsingError(body, "parsePlanningEvents", "Planning JSON payload not found");
+}
+
+function parsePlanningJsonCandidate(
+	candidate: string,
+): { payload: string; parsed: unknown } | null {
+	if (!candidate.startsWith("{") && !candidate.startsWith("[")) {
+		return null;
+	}
+
+	let parsed: unknown;
+
+	try {
+		parsed = JSON.parse(candidate);
+	} catch {
+		return null;
+	}
+
+	if (Array.isArray(parsed)) {
+		return { payload: candidate, parsed };
+	}
+
+	if (isRecord(parsed) && Array.isArray(parsed.events)) {
+		return { payload: JSON.stringify(parsed.events), parsed: parsed.events };
+	}
+
+	return null;
 }
 
 /**
@@ -143,21 +175,23 @@ interface PlanningEventPayload {
 }
 
 function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
-	if (!value || typeof value !== "object") {
+	if (!isRecord(value)) {
 		return false;
 	}
 
-	const candidate = value as Record<string, unknown>;
-
 	return (
-		typeof candidate.id === "string" &&
-		typeof candidate.title === "string" &&
-		"start" in candidate &&
-		"end" in candidate &&
-		typeof candidate.allDay === "boolean" &&
-		typeof candidate.editable === "boolean" &&
-		typeof candidate.className === "string"
+		typeof value.id === "string" &&
+		typeof value.title === "string" &&
+		"start" in value &&
+		"end" in value &&
+		typeof value.allDay === "boolean" &&
+		typeof value.editable === "boolean" &&
+		typeof value.className === "string"
 	);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
 }
 
 /**
