@@ -35,9 +35,7 @@ export interface AurionValueCacheEntry<TValue = unknown> {
 /**
  * Union des formats d'entrée stockables dans un {@link AurionCacheStore}.
  */
-export type AurionCacheEntry<TValue = unknown> =
-	| AurionTransportCacheEntry
-	| AurionValueCacheEntry<TValue>;
+export type AurionCacheEntry<TValue = unknown> = AurionTransportCacheEntry | AurionValueCacheEntry<TValue>;
 
 /**
  * Backend de cache personnalisable utilisé par la session et le transport.
