@@ -142,6 +142,40 @@ export interface AurionPlanningEvent {
 	editable: boolean;
 	/** Type de l'événement (ex. "Cours", "TP", "Examen") tel que fourni par Aurion. */
 	type: string;
+	/** Charge les détails complets de l'événement depuis la modale Aurion. */
+	getDetails(): Promise<AurionPlanningEventDetails>;
+}
+
+/**
+ * Détails complets d'un événement de planning tels qu'affichés dans la modale Aurion.
+ */
+export interface AurionPlanningEventDetails {
+	/** Identifiant de l'événement détaillé. */
+	eventId: string;
+	/** Date/heure de début affichée dans la modale. */
+	start: Date;
+	/** Date/heure de fin affichée dans la modale. */
+	end: Date;
+	/** Statut Aurion de l'événement, ou `null` si absent. */
+	status: string | null;
+	/** Matière ou catégorie pédagogique, ou `null` si absente. */
+	subject: string | null;
+	/** Type d'enseignement, ou `null` si absent. */
+	teachingType: string | null;
+	/** Description libre, ou `null` si vide. */
+	description: string | null;
+	/** Indique si l'événement est déclaré comme épreuve. */
+	isExam: boolean;
+	/** Intervenants associés à l'événement. */
+	teachers: Array<{ lastName: string; firstName: string }>;
+	/** Apprenants associés à l'événement. */
+	students: Array<{ lastName: string; firstName: string }>;
+	/** Groupes associés à l'événement. */
+	groups: Array<{ code: string; name: string }>;
+	/** Cours associés à l'événement. */
+	courses: Array<{ code: string; course: string; module: string }>;
+	/** Ressources ou salles associées à l'événement. */
+	resources: Array<{ code: string; name: string }>;
 }
 
 /**

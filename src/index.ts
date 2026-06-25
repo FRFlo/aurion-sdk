@@ -25,6 +25,7 @@ export type {
 	AurionCacheTimeRangeApproximationOptions,
 	AurionGrade,
 	AurionPlanningEvent,
+	AurionPlanningEventDetails,
 	AurionPlanningOptions,
 	AurionSessionOptions,
 	AurionTimeRangeApproximation,
@@ -33,6 +34,7 @@ export type {
 export { parseAbsences, toAurionAbsence } from "./parsers/absences";
 export { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
 export {
+	parseEventDetails,
 	parseFormIdPlanning,
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
