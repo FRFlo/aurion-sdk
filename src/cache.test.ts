@@ -41,6 +41,35 @@ function createSession(
 	});
 }
 
+interface PlanningNavigationCounts {
+	root: number;
+	mainMenuGet: number;
+	mainMenuPost: number;
+	planningGet: number;
+	planningPost: number;
+}
+
+function getPlanningCounts(
+	countsBySession: Map<string, PlanningNavigationCounts>,
+	sessionId: string,
+): PlanningNavigationCounts {
+	const existing = countsBySession.get(sessionId);
+	if (existing) {
+		return existing;
+	}
+
+	const counts = {
+		root: 0,
+		mainMenuGet: 0,
+		mainMenuPost: 0,
+		planningGet: 0,
+		planningPost: 0,
+	};
+	countsBySession.set(sessionId, counts);
+
+	return counts;
+}
+
 async function seedSessionValue<TValue>(
 	cacheStore: InMemoryAurionCache,
 	parts: {
@@ -326,6 +355,392 @@ describe("cache configuration", () => {
 		);
 		expect(planningRequest.get("form:date_input")).toBe("01/01/2025");
 		expect(planningRequest.get("form:week")).toBe("01-2025");
+	});
+
+	test("AurionSession reuses resolved navigation nodes between uncached planning requests", async () => {
+		const counts = {
+			root: 0,
+			mainMenuGet: 0,
+			mainMenuPost: 0,
+			planningGet: 0,
+			planningPost: 0,
+		};
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly",
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				counts.root += 1;
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-root"><input name="form:idInit" value="root-id">',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "GET") {
+				counts.mainMenuGet += 1;
+				return new Response(
+					"<a onclick=\"PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'planning-menu'})\"><span class=\"ui-menuitem-icon ui-icon fa fa-calendar-alt\"></span><span class=\"ui-menuitem-text\">Mon Planning</span></a>",
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				counts.mainMenuPost += 1;
+				return new Response("sidebar-ok", { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
+				counts.planningGet += 1;
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-planning"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				counts.planningPost += 1;
+				return new Response(
+					'[{"id":"event-inside","title":"Inside","start":"2025-01-01T10:45:00.000Z","end":"2025-01-01T11:00:00.000Z","allDay":false,"editable":false,"className":"Cours"}]',
+					{ status: 200 },
+				);
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(false, { fetchFn });
+
+		await expect(
+			session.getPlanning({
+				start: new Date("2025-01-01T10:00:00.000Z"),
+				end: new Date("2025-01-01T11:00:00.000Z"),
+			}),
+		).resolves.toHaveLength(1);
+		await expect(
+			session.getPlanning({
+				start: new Date("2025-01-01T10:30:00.000Z"),
+				end: new Date("2025-01-01T11:30:00.000Z"),
+			}),
+		).resolves.toHaveLength(1);
+
+		expect(counts).toEqual({
+			root: 1,
+			mainMenuGet: 1,
+			mainMenuPost: 1,
+			planningGet: 1,
+			planningPost: 2,
+		});
+	});
+
+	test("AurionSession invalidates stale navigation nodes and rebuilds descendants once", async () => {
+		const counts = {
+			root: 0,
+			mainMenuGet: 0,
+			mainMenuPost: 0,
+			planningGet: 0,
+			planningPost: 0,
+		};
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly",
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				counts.root += 1;
+				return new Response(
+					`<input name="javax.faces.ViewState" value="view-root-${counts.root}"><input name="form:idInit" value="root-id-${counts.root}">`,
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "GET") {
+				counts.mainMenuGet += 1;
+				return new Response(
+					"<a onclick=\"PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'planning-menu'})\"><span class=\"ui-menuitem-icon ui-icon fa fa-calendar-alt\"></span><span class=\"ui-menuitem-text\">Mon Planning</span></a>",
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				counts.mainMenuPost += 1;
+				return new Response("sidebar-ok", { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
+				counts.planningGet += 1;
+				return new Response(
+					`<input name="javax.faces.ViewState" value="view-planning-${counts.planningGet}"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>`,
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				counts.planningPost += 1;
+
+				if (counts.planningPost === 2) {
+					return new Response("stale view state", { status: 500 });
+				}
+
+				const postData = new URLSearchParams(init?.body?.toString() ?? "");
+				const startTimestamp = Number(postData.get("form:planning_start"));
+				const eventStart = new Date(startTimestamp + 15 * 60 * 1000);
+				const eventEnd = new Date(startTimestamp + 30 * 60 * 1000);
+
+				return new Response(
+					`[{"id":"event-${counts.planningPost}","title":"Inside","start":"${eventStart.toISOString()}","end":"${eventEnd.toISOString()}","allDay":false,"editable":false,"className":"Cours"}]`,
+					{ status: 200 },
+				);
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(false, { fetchFn });
+
+		await expect(
+			session.getPlanning({
+				start: new Date("2025-01-01T10:00:00.000Z"),
+				end: new Date("2025-01-01T11:00:00.000Z"),
+			}),
+		).resolves.toHaveLength(1);
+		await expect(
+			session.getPlanning({
+				start: new Date("2025-01-01T12:00:00.000Z"),
+				end: new Date("2025-01-01T13:00:00.000Z"),
+			}),
+		).resolves.toHaveLength(1);
+
+		expect(counts).toEqual({
+			root: 2,
+			mainMenuGet: 2,
+			mainMenuPost: 2,
+			planningGet: 2,
+			planningPost: 3,
+		});
+	});
+
+	test("AurionSession keeps navigation nodes isolated between sessions sharing a cache store", async () => {
+		const cacheStore = new InMemoryAurionCache();
+		const countsBySession = new Map<string, PlanningNavigationCounts>();
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+			const sessionId = url.includes("session-b.test") ? "session-b" : "session-a";
+			const counts = getPlanningCounts(countsBySession, sessionId);
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": `${sessionId}=test; Path=/; HttpOnly`,
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				counts.root += 1;
+				return new Response(
+					`<input name="javax.faces.ViewState" value="view-root-${sessionId}"><input name="form:idInit" value="root-id-${sessionId}">`,
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "GET") {
+				counts.mainMenuGet += 1;
+				return new Response(
+					"<a onclick=\"PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'planning-menu'})\"><span class=\"ui-menuitem-icon ui-icon fa fa-calendar-alt\"></span><span class=\"ui-menuitem-text\">Mon Planning</span></a>",
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				counts.mainMenuPost += 1;
+				return new Response("sidebar-ok", { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
+				counts.planningGet += 1;
+				return new Response(
+					`<input name="javax.faces.ViewState" value="view-planning-${sessionId}"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>`,
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				counts.planningPost += 1;
+				const postData = new URLSearchParams(init?.body?.toString() ?? "");
+				const startTimestamp = Number(postData.get("form:planning_start"));
+				const eventStart = new Date(startTimestamp + 15 * 60 * 1000);
+				const eventEnd = new Date(startTimestamp + 30 * 60 * 1000);
+
+				return new Response(
+					`[{"id":"event-${sessionId}-${counts.planningPost}","title":"Inside","start":"${eventStart.toISOString()}","end":"${eventEnd.toISOString()}","allDay":false,"editable":false,"className":"Cours"}]`,
+					{ status: 200 },
+				);
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const firstSession = createSession(cacheStore, {
+			baseUrl: "https://session-a.test",
+			fetchFn,
+		});
+		const secondSession = createSession(cacheStore, {
+			baseUrl: "https://session-b.test",
+			fetchFn,
+		});
+		const planningWindow = {
+			start: new Date("2025-01-01T10:00:00.000Z"),
+			end: new Date("2025-01-01T11:00:00.000Z"),
+		};
+
+		await expect(firstSession.getPlanning(planningWindow)).resolves.toHaveLength(1);
+		await expect(secondSession.getPlanning(planningWindow)).resolves.toHaveLength(1);
+		await expect(firstSession.getPlanning({
+			start: new Date("2025-01-01T12:00:00.000Z"),
+			end: new Date("2025-01-01T13:00:00.000Z"),
+		})).resolves.toHaveLength(1);
+
+		expect(countsBySession.get("session-a")).toEqual({
+			root: 1,
+			mainMenuGet: 1,
+			mainMenuPost: 1,
+			planningGet: 1,
+			planningPost: 2,
+		});
+		expect(countsBySession.get("session-b")).toEqual({
+			root: 1,
+			mainMenuGet: 1,
+			mainMenuPost: 1,
+			planningGet: 1,
+			planningPost: 1,
+		});
+	});
+
+	test("AurionSession reuses form-capable root for sibling branches without reusing page-specific nodes", async () => {
+		const counts = {
+			root: 0,
+			planningMainMenuGet: 0,
+			planningMainMenuPost: 0,
+			planningGet: 0,
+			planningPost: 0,
+			absencesMainMenuPost: 0,
+			absencesGet: 0,
+			absencesPost: 0,
+		};
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly",
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				counts.root += 1;
+				return new Response(
+					'>chargerSousMenu = function(){PrimeFaces.ab({s:"form:j_idt1",f:"form"});}<input name="javax.faces.ViewState" value="view-root"><input name="form:idInit" value="root-id">',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "GET") {
+				counts.planningMainMenuGet += 1;
+				return new Response(
+					"<a onclick=\"PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'planning-menu'})\"><span class=\"ui-menuitem-icon ui-icon fa fa-calendar-alt\"></span><span class=\"ui-menuitem-text\">Mon Planning</span></a>",
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				const body = init?.body?.toString() ?? "";
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU")) {
+					counts.absencesMainMenuPost += 1;
+					return new Response("<update>form:sidebar_menuid:'absences-menu' Mes absences</span></update>", {
+						status: 200,
+					});
+				}
+
+				counts.planningMainMenuPost += 1;
+				return new Response("sidebar-ok", { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "GET") {
+				counts.planningGet += 1;
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-planning"><script>PrimeFaces.cw("Schedule","schedule",{id:"form:planning"});</script>',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				counts.planningPost += 1;
+				return new Response(
+					'[{"id":"event-inside","title":"Inside","start":"2025-01-01T10:15:00.000Z","end":"2025-01-01T10:45:00.000Z","allDay":false,"editable":false,"className":"Cours"}]',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MesAbsences.xhtml") && method === "GET") {
+				counts.absencesGet += 1;
+				return new Response(
+					'<input name="javax.faces.ViewState" value="view-absences"><input name="form:idInit" value="absences-id">',
+					{ status: 200 },
+				);
+			}
+
+			if (url.endsWith("/faces/MesAbsences.xhtml") && method === "POST") {
+				counts.absencesPost += 1;
+				return new Response('<tbody class="ui-datatable-data"></tbody>', { status: 200 });
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(false, { fetchFn });
+
+		await expect(session.getAbsences()).resolves.toEqual([]);
+		await expect(
+			session.getPlanning({
+				start: new Date("2025-01-01T10:00:00.000Z"),
+				end: new Date("2025-01-01T11:00:00.000Z"),
+			}),
+		).resolves.toHaveLength(1);
+
+			expect(counts).toEqual({
+			root: 1,
+			planningMainMenuGet: 1,
+			planningMainMenuPost: 2,
+			planningGet: 1,
+			planningPost: 1,
+			absencesMainMenuPost: 1,
+			absencesGet: 1,
+			absencesPost: 1,
+		});
 	});
 
 	test("AurionSession cache keys include baseUrl to avoid collisions across instances", async () => {
