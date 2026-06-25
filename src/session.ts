@@ -54,6 +54,7 @@ export class AurionSession {
 	private readonly transport: AurionTransport;
 	private readonly sessionCacheMaxAgeMs?: number;
 	private readonly planningTimeRangeApproximationMs?: number;
+	private readonly navigationNodes = new Map<AurionNavigationNodeId, AurionNavigationNode>();
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
@@ -109,19 +110,11 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: GradesNavigationState = {
-				viewState: "",
-				formId: "",
-				menuId: "",
-				idInit: "",
-				formIdGrade: "",
-			};
+			const rawGrades = await this.withNavigationRetry("gradesPage", async () => {
+				const state = await this.resolveGradesPageNode();
 
-			await this.initializeSession(state);
-			await this.postMainMenu(state);
-			await this.postMainSidebar(state);
-
-			const rawGrades = await this.postGrade(state);
+				return this.postGrade(state);
+			});
 
 			const grades = rawGrades.map((rawGrade) => toAurionGrade(rawGrade));
 			await this.writeCachedValue(cacheKey, grades);
@@ -171,21 +164,6 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: PlanningNavigationState = {
-				viewState: "",
-				menuId: "",
-				idInit: "",
-				formIdPlanning: "",
-			};
-
-			await this.initializeRootNavigationState(state, {
-				includeFormId: false,
-			});
-
-			await this.loadPlanningSidebarMenuId(state);
-			await this.postSidebarNavigation(state, "getPlanning:postMainSidebar");
-			await this.loadPlanningFormState(state);
-
 			const planningDate = new Date(cacheWindow.startTimestamp);
 			const today = planningDate.toLocaleDateString("fr-FR", {
 				day: "2-digit",
@@ -195,14 +173,18 @@ export class AurionSession {
 			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
 			const year = String(planningDate.getFullYear());
 
-			const response = await this.postPlanning(
-				state,
-				cacheWindow.startTimestamp,
-				cacheWindow.endTimestamp,
-				today,
-				week,
-				year,
-			);
+			const response = await this.withNavigationRetry("planningPage", async () => {
+				const state = await this.resolvePlanningPageNode();
+
+				return this.postPlanning(
+					state,
+					cacheWindow.startTimestamp,
+					cacheWindow.endTimestamp,
+					today,
+					week,
+					year,
+				);
+			});
 
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
@@ -246,22 +228,11 @@ export class AurionSession {
 
 			await this.transport.login();
 
-			const state: AbsencesNavigationState = {
-				viewState: "",
-				formId: "",
-				menuId: "",
-				idInit: "",
-			};
+			const rawAbsences = await this.withNavigationRetry("absencesPage", async () => {
+				const state = await this.resolveAbsencesPageNode();
 
-			await this.initializeRootNavigationState(state, {
-				includeFormId: true,
+				return this.postAbsencesTable(state);
 			});
-
-			await this.postAbsencesMainMenu(state);
-			await this.postSidebarNavigation(state, "getAbsences:postMainSidebar");
-			await this.loadAbsencesPageState(state);
-
-			const rawAbsences = await this.postAbsencesTable(state);
 
 			const absences = rawAbsences.map((rawAbsence) => toAurionAbsence(rawAbsence));
 			await this.writeCachedValue(cacheKey, absences);
@@ -293,6 +264,157 @@ export class AurionSession {
 		});
 	}
 
+	private async resolveRootNavigationNode(options: {
+		includeFormId: boolean;
+	}): Promise<RootNavigationState> {
+		const cached = this.readNavigationNode<RootNavigationState>("root");
+		if (cached && (!options.includeFormId || cached.formId)) {
+			return cached;
+		}
+
+		if (cached) {
+			this.invalidateNavigationNode("root");
+		}
+
+		const state: RootNavigationState = {
+			viewState: "",
+			idInit: "",
+		};
+
+		await this.initializeRootNavigationState(state, options);
+		this.writeNavigationNode("root", null, state);
+
+		return state;
+	}
+
+	private async resolveGradesMenuNode(): Promise<GradesMenuNavigationState> {
+		const cached = this.readNavigationNode<GradesMenuNavigationState>("gradesMenu");
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: true,
+		});
+		const state: GradesMenuNavigationState = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			formId: requireRootFormId(root),
+			menuId: "",
+		};
+
+		await this.postMainMenu(state);
+		this.writeNavigationNode("gradesMenu", "root", state);
+
+		return state;
+	}
+
+	private async resolveGradesPageNode(): Promise<GradesNavigationState> {
+		const cached = this.readNavigationNode<GradesNavigationState>("gradesPage");
+		if (cached) {
+			return cached;
+		}
+
+		const menu = await this.resolveGradesMenuNode();
+		const state: GradesNavigationState = {
+			viewState: menu.viewState,
+			idInit: menu.idInit,
+			formId: menu.formId,
+			menuId: menu.menuId,
+			formIdGrade: "",
+		};
+
+		await this.postMainSidebar(state);
+		this.writeNavigationNode("gradesPage", "gradesMenu", state);
+
+		return state;
+	}
+
+	private async resolvePlanningMenuNode(): Promise<PlanningMenuNavigationState> {
+		const cached = this.readNavigationNode<PlanningMenuNavigationState>("planningMenu");
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: false,
+		});
+		const state: PlanningMenuNavigationState = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			menuId: "",
+		};
+
+		await this.loadPlanningSidebarMenuId(state);
+		this.writeNavigationNode("planningMenu", "root", state);
+
+		return state;
+	}
+
+	private async resolvePlanningPageNode(): Promise<PlanningNavigationState> {
+		const cached = this.readNavigationNode<PlanningNavigationState>("planningPage");
+		if (cached) {
+			return cached;
+		}
+
+		const menu = await this.resolvePlanningMenuNode();
+		const state: PlanningNavigationState = {
+			viewState: menu.viewState,
+			idInit: menu.idInit,
+			menuId: menu.menuId,
+			formIdPlanning: "",
+		};
+
+		await this.postSidebarNavigation(state, "getPlanning:postMainSidebar");
+		await this.loadPlanningFormState(state);
+		this.writeNavigationNode("planningPage", "planningMenu", state);
+
+		return state;
+	}
+
+	private async resolveAbsencesMenuNode(): Promise<AbsencesNavigationState> {
+		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesMenu");
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: true,
+		});
+		const state: AbsencesNavigationState = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			formId: requireRootFormId(root),
+			menuId: "",
+		};
+
+		await this.postAbsencesMainMenu(state);
+		this.writeNavigationNode("absencesMenu", "root", state);
+
+		return state;
+	}
+
+	private async resolveAbsencesPageNode(): Promise<AbsencesNavigationState> {
+		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesPage");
+		if (cached) {
+			return cached;
+		}
+
+		const menu = await this.resolveAbsencesMenuNode();
+		const state: AbsencesNavigationState = {
+			viewState: menu.viewState,
+			idInit: menu.idInit,
+			formId: menu.formId,
+			menuId: menu.menuId,
+		};
+
+		await this.postSidebarNavigation(state, "getAbsences:postMainSidebar");
+		await this.loadAbsencesPageState(state);
+		this.writeNavigationNode("absencesPage", "absencesMenu", state);
+
+		return state;
+	}
+
 	/**
 	 * Ouvre le sous-menu principal qui mène à la zone des notes.
 	 *
@@ -300,7 +422,7 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque l'identifiant de menu latéral est disponible.
 	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
 	 */
-	private async postMainMenu(state: GradesNavigationState): Promise<void> {
+	private async postMainMenu(state: GradesMenuNavigationState): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
 			"javax.faces.source": state.formId,
@@ -361,7 +483,7 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque le menu planning est identifié.
 	 * @throws {AurionError} Si l'écran principal ou le menu planning ne peuvent pas être lus.
 	 */
-	private async loadPlanningSidebarMenuId(state: PlanningNavigationState): Promise<void> {
+	private async loadPlanningSidebarMenuId(state: PlanningMenuNavigationState): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MainMenuPage.xhtml",
 			method: "GET",
@@ -671,6 +793,56 @@ export class AurionSession {
 		assertNavigationSuccess(step, response.status, response.url);
 	}
 
+	private async withNavigationRetry<TValue>(
+		nodeId: AurionNavigationNodeId,
+		action: () => Promise<TValue>,
+	): Promise<TValue> {
+		try {
+			return await action();
+		} catch (error: unknown) {
+			if (!isAurionError(error) || !isRecoverableNavigationError(error.code)) {
+				throw error;
+			}
+
+			this.invalidateNavigationNode(nodeId);
+			this.invalidateNavigationNode("root");
+
+			return action();
+		}
+	}
+
+	private readNavigationNode<TState>(id: AurionNavigationNodeId): TState | null {
+		const node = this.navigationNodes.get(id);
+		if (!node) {
+			return null;
+		}
+
+		return node.state as TState;
+	}
+
+	private writeNavigationNode<TState>(
+		id: AurionNavigationNodeId,
+		parentId: AurionNavigationNodeId | null,
+		state: TState,
+	): void {
+		this.navigationNodes.set(id, {
+			id,
+			parentId,
+			createdAt: Date.now(),
+			state,
+		});
+	}
+
+	private invalidateNavigationNode(id: AurionNavigationNodeId): void {
+		this.navigationNodes.delete(id);
+
+		for (const node of Array.from(this.navigationNodes.values())) {
+			if (node.parentId === id) {
+				this.invalidateNavigationNode(node.id);
+			}
+		}
+	}
+
 	private async readCachedValue<TValue>(key: string): Promise<TValue | null> {
 		if (!this.cacheStore) {
 			return null;
@@ -707,6 +879,27 @@ export class AurionSession {
 }
 
 /** État intermédiaire propagé entre les étapes de navigation Aurion. */
+interface RootNavigationState {
+	viewState: string;
+	idInit: string;
+	formId?: string;
+}
+
+/** État du menu Notes résolu depuis la racine de session. */
+interface GradesMenuNavigationState {
+	viewState: string;
+	formId: string;
+	menuId: string;
+	idInit: string;
+}
+
+/** État du menu Planning résolu depuis la racine de session. */
+interface PlanningMenuNavigationState {
+	viewState: string;
+	menuId: string;
+	idInit: string;
+}
+
 interface GradesNavigationState {
 	viewState: string;
 	formId: string;
@@ -729,6 +922,22 @@ interface AbsencesNavigationState {
 	formId: string;
 	menuId: string;
 	idInit: string;
+}
+
+type AurionNavigationNodeId =
+	| "root"
+	| "gradesMenu"
+	| "gradesPage"
+	| "planningMenu"
+	| "planningPage"
+	| "absencesMenu"
+	| "absencesPage";
+
+interface AurionNavigationNode {
+	id: AurionNavigationNodeId;
+	parentId: AurionNavigationNodeId | null;
+	createdAt: number;
+	state: unknown;
 }
 
 /**
@@ -755,6 +964,24 @@ function assertNavigationSuccess(step: string, status: number, url: string): voi
 			expected: "2xx",
 		},
 	);
+}
+
+function requireRootFormId(state: RootNavigationState): string {
+	if (state.formId) {
+		return state.formId;
+	}
+
+	throw createAurionError(
+		"AURION_NAVIGATION_ERROR",
+		"Identifiant de formulaire racine Aurion indisponible.",
+		{
+			parser: "requireRootFormId",
+		},
+	);
+}
+
+function isRecoverableNavigationError(code: string): boolean {
+	return code === "AURION_NAVIGATION_ERROR" || code === "AURION_PARSING_ERROR";
 }
 
 /**
