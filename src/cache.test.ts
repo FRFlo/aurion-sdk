@@ -969,6 +969,144 @@ describe("cache configuration", () => {
 
 		await expect(session.getGrades()).rejects.toThrow("La requête réseau Aurion a échoué.");
 	});
+
+	test("AurionSession navigates grouped planning API and posts captured-shaped payloads", async () => {
+		const capturedSubmenuBody = await Bun.file("aurion-cursus-082-request-body.txt").text();
+		const capturedChoixPlanningBody = await Bun.file("aurion-cursus-123-request-body.txt").text();
+		const postedBodies: string[] = [];
+		const rootBody = `
+			>chargerSousMenu = function(){PrimeFaces.ab({s:"form:j_idt52",f:"form"});}
+			<input name="javax.faces.ViewState" value="view-root">
+			<input name="form:idInit" value="root-id">
+			<a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_3131476'})"><span>Les plannings</span></a>
+		`;
+		const choixPlanningBody = `
+			<input name="javax.faces.ViewState" value="view-choix">
+			<input name="form:idInit" value="choix-id">
+			<input name="form:j_idt181_selection" value="">
+			<table><tbody>
+				<tr data-rk="60288885"><td><input name="form:j_idt181_checkbox" value="60288885"></td><td>ISEN AP3</td></tr>
+			</tbody></table>
+			<button id="form:j_idt243" name="form:j_idt243" type="submit">Voir planning</button>
+		`;
+		const planningPageBody = `
+			<input name="javax.faces.ViewState" value="view-planning">
+			<input name="form:idInit" value="planning-id">
+			<input name="form:date_input" value="22/06/2026">
+			<input name="form:week" value="26-2026">
+			<script>PrimeFaces.cw("Schedule","schedule",{id:"form:j_idt118"});</script>
+		`;
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+			const body = init?.body?.toString() ?? "";
+
+			if (body) {
+				postedBodies.push(body);
+			}
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: {
+						"Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly",
+					},
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				return new Response(rootBody, { status: 200 });
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_44413")) {
+					return new Response(rootBody, { status: 200 });
+				}
+
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476")) {
+					return new Response(
+						`<li id="submenu_3131476"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_7465293'})"><span>Plannings Groupés par Promotion</span></a><ul><li id="submenu_7465293"></li></ul></li>`,
+						{ status: 200 },
+					);
+				}
+
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_7465293")) {
+					return new Response(
+						`<li id="submenu_7465293"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_9690235'})"><span>ISEN</span></a><ul><li id="submenu_9690235"></li></ul></li>`,
+						{ status: 200 },
+					);
+				}
+
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_9690235")) {
+					return new Response(
+						`<li id="submenu_9690235"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_9690237'})"><span>AP</span></a><ul><li id="submenu_9690237"></li></ul></li>`,
+						{ status: 200 },
+					);
+				}
+
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_9690237")) {
+					return new Response(
+						`<li id="submenu_9690237"><a onclick="PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'3_0_6_0'})"><span>AP3</span></a></li>`,
+						{ status: 200 },
+					);
+				}
+
+				if (body.includes("form%3Asidebar_menuid=3_0_6_0")) {
+					return new Response(choixPlanningBody, { status: 200 });
+				}
+			}
+
+			if (url.endsWith("/faces/ChoixPlanning.xhtml") && method === "POST") {
+				return new Response(planningPageBody, { status: 200 });
+			}
+
+			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				return new Response(
+					`[{"id":"event-group","title":"Group planning","start":"2026-06-22T08:00:00.000Z","end":"2026-06-22T10:00:00.000Z","allDay":false,"editable":false,"className":"Cours"}]`,
+					{ status: 200 },
+				);
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(false, { fetchFn });
+		const groups = await session.getPlanningsGroups();
+		const subgroups = await groups[0]?.getSubgroups();
+		const plannings = await subgroups?.[0]?.getPlannings();
+		const planning = await plannings?.[0]?.getPlanning({
+			start: new Date("2026-06-22T00:00:00.000Z"),
+			end: new Date("2026-06-23T00:00:00.000Z"),
+		});
+
+		expect(groups[0]?.name).toBe("ISEN");
+		expect(subgroups?.[0]?.name).toBe("AP3");
+		expect(plannings?.[0]?.id).toBe("60288885");
+		expect(planning?.[0]?.id).toBe("event-group");
+		expect(typeof planning?.[0]?.getDetails).toBe("function");
+
+		const submenuBody = postedBodies.find((body) =>
+			body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476"),
+		);
+		const choixBody = postedBodies.find((body) =>
+			body.includes("form%3Aj_idt181_selection=60288885"),
+		);
+		const planningBody = postedBodies.find((body) => body.includes("form%3Aj_idt118_start="));
+
+		expect(submenuBody).toContain("javax.faces.partial.render=form%3Asidebar");
+		expect(submenuBody).toContain("form%3Aj_idt773_input=44323");
+		expect(capturedSubmenuBody).toContain("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476");
+		expect(choixBody).toContain("form%3Aj_idt181_checkbox=on");
+		expect(choixBody).toContain("form%3Aj_idt243=");
+		expect(choixBody).toContain("form%3Aj_idt181%3Aj_idt186%3Afilter=");
+		expect(choixBody).toContain("form%3AmessagesRubriqueInaccessible=");
+		expect(choixBody).not.toContain("form%3Aj_idt244_focus");
+		expect(choixBody).not.toContain("form%3Asidebar_menuid=3_0_6_0");
+		expect(choixBody).not.toContain("form%3Asidebar=form%3Asidebar");
+		expect(capturedChoixPlanningBody).toContain("form:j_idt181_selection=60288885");
+		expect(planningBody).toContain("form%3Aj_idt118_view=agendaWeek");
+		expect(planningBody).not.toContain("form%3Aj_idt244_focus");
+	});
 });
 
 describe("transport cache", () => {
