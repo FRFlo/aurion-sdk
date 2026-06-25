@@ -8,6 +8,7 @@ import { createAurionError, isAurionError } from "./errors";
 import { parseAbsences, toAurionAbsence } from "./parsers/absences";
 import { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
 import {
+	parseEventDetails,
 	parseFormIdPlanning,
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
@@ -19,6 +20,7 @@ import type {
 	AurionAbsence,
 	AurionGrade,
 	AurionPlanningEvent,
+	AurionPlanningEventDetails,
 	AurionPlanningOptions,
 	AurionSessionOptions,
 	RawAurionAbsenceRow,
@@ -30,6 +32,12 @@ const MAIN_MENU_SUBMENU_ID = "submenu_44413";
 const AURION_USER_CONTEXT_ID = "44323";
 const FORM_URLENCODED_HEADERS = {
 	"Content-Type": "application/x-www-form-urlencoded",
+} as const;
+const PRIMEFACES_AJAX_HEADERS = {
+	...FORM_URLENCODED_HEADERS,
+	Accept: "application/xml, text/xml, */*; q=0.01",
+	"Faces-Request": "partial/ajax",
+	"X-Requested-With": "XMLHttpRequest",
 } as const;
 
 /**
@@ -157,9 +165,10 @@ export class AurionSession {
 		);
 
 		try {
-			const cached = await this.readCachedValue<AurionPlanningEvent[]>(cacheKey);
+			const cached =
+				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
 			if (cached) {
-				return filterPlanningEventsByWindow(cached, exactWindow);
+				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
 			}
 
 			await this.transport.login();
@@ -189,7 +198,7 @@ export class AurionSession {
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
 
-			return filterPlanningEventsByWindow(planning, exactWindow);
+			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -198,6 +207,53 @@ export class AurionSession {
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
 				"Erreur inattendue durant la récupération du planning Aurion.",
+				error,
+			);
+		}
+	}
+
+	/**
+	 * Récupère les détails complets d'un événement de planning Aurion.
+	 *
+	 * Cette méthode reproduit l'action PrimeFaces `eventSelect` du calendrier pour
+	 * faire rendre la modale `form:modaleDetail`, puis parse son contenu.
+	 *
+	 * @param eventId Identifiant de l'événement à détailler.
+	 * @returns Les détails complets affichés par Aurion pour cet événement.
+	 * @throws {AurionError} Si la navigation, la requête AJAX ou le parsing échoue.
+	 */
+	async getEventDetails(eventId: string): Promise<AurionPlanningEventDetails> {
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:eventDetails:${eventId}`,
+		);
+
+		try {
+			const cached = await this.readCachedValue<AurionPlanningEventDetails>(cacheKey);
+			if (cached) {
+				return cached;
+			}
+
+			await this.transport.login();
+
+			const response = await this.withNavigationRetry("planningPage", async () => {
+				const state = await this.resolvePlanningPageNode();
+
+				return this.postEventDetails(state, eventId);
+			});
+
+			const details = parseEventDetails(response.body, eventId);
+			await this.writeCachedValue(cacheKey, details);
+
+			return details;
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des détails d'événement Aurion.",
 				error,
 			);
 		}
@@ -517,6 +573,8 @@ export class AurionSession {
 		assertNavigationSuccess("getPlanning:loadPlanningPage", response.status, response.url);
 		state.viewState = parseViewState(response.body);
 		state.formIdPlanning = parseFormIdPlanning(response.body);
+		state.dateInput = parseInputValue(response.body, "form:date_input");
+		state.weekInput = parseInputValue(response.body, "form:week");
 	}
 
 	/**
@@ -568,6 +626,60 @@ export class AurionSession {
 		});
 
 		assertNavigationSuccess("getPlanning:postPlanning", response.status, response.url);
+
+		return {
+			body: response.body,
+		};
+	}
+
+	/**
+	 * Déclenche l'action PrimeFaces `eventSelect` du planning pour rendre la modale de détails.
+	 *
+	 * @param state État de navigation du planning contenant les identifiants JSF actifs.
+	 * @param eventId Identifiant d'événement sélectionné.
+	 * @returns Un objet contenant le corps XML partiel renvoyé par Aurion.
+	 * @throws {AurionError} Si l'appel PrimeFaces échoue.
+	 */
+	private async postEventDetails(
+		state: PlanningNavigationState,
+		eventId: string,
+	): Promise<{ body: string }> {
+		const sourceId = state.formIdPlanning;
+		const fallbackDate = new Date();
+		const today = fallbackDate.toLocaleDateString("fr-FR", {
+			day: "2-digit",
+			month: "2-digit",
+			year: "numeric",
+		});
+		const week = String(getWeekNumber(fallbackDate)).padStart(2, "0");
+		const year = String(fallbackDate.getFullYear());
+		const postData = new URLSearchParams({
+			"javax.faces.partial.ajax": "true",
+			"javax.faces.source": sourceId,
+			"javax.faces.partial.execute": sourceId,
+			"javax.faces.partial.render": "form:modaleDetail form:confirmerSuppression",
+			"javax.faces.behavior.event": "eventSelect",
+			"javax.faces.partial.event": "eventSelect",
+			[`${sourceId}_selectedEventId`]: eventId,
+			...createMainMenuCommonFields(state.idInit, "1605"),
+			"form:date_input": state.dateInput ?? today,
+			"form:week": state.weekInput ?? `${week}-${year}`,
+			[`${sourceId}_view`]: "agendaWeek",
+			"form:offsetFuseauNavigateur": "-7200000",
+			"form:onglets_activeIndex": "0",
+			"form:onglets_scrollState": "0",
+			"javax.faces.ViewState": state.viewState,
+		});
+
+		const response = await this.transport.request({
+			path: "/faces/Planning.xhtml",
+			method: "POST",
+			body: postData,
+			headers: PRIMEFACES_AJAX_HEADERS,
+			cache: false,
+		});
+
+		assertNavigationSuccess("getEventDetails:postEventSelect", response.status, response.url);
 
 		return {
 			body: response.body,
@@ -876,6 +988,15 @@ export class AurionSession {
 	private getSessionCacheScope(): string {
 		return `${this.baseUrl}:${this.username}`;
 	}
+
+	private attachEventMethods(
+		events: Array<Omit<AurionPlanningEvent, "getDetails">>,
+	): AurionPlanningEvent[] {
+		return events.map((event) => ({
+			...event,
+			getDetails: () => this.getEventDetails(event.id),
+		}));
+	}
 }
 
 /** État intermédiaire propagé entre les étapes de navigation Aurion. */
@@ -914,6 +1035,8 @@ interface PlanningNavigationState {
 	menuId: string;
 	idInit: string;
 	formIdPlanning: string;
+	dateInput?: string | null;
+	weekInput?: string | null;
 }
 
 /** État intermédiaire utilisé pendant la navigation de la section absences. */
@@ -1018,6 +1141,15 @@ function createFormFocusAndInputFields(
 		[focusField]: "",
 		[inputField]: AURION_USER_CONTEXT_ID,
 	};
+}
+
+function parseInputValue(body: string, name: string): string | null {
+	const escapedName = name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = body.match(
+		new RegExp(`<input[^>]*name=["']${escapedName}["'][^>]*value=["']([^"']*)["']`, "i"),
+	);
+
+	return match?.[1] ?? null;
 }
 
 /**
