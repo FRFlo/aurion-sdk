@@ -4,6 +4,7 @@ export type { AurionError, AurionErrorCode } from "./errors";
 export { isAurionError } from "./errors";
 /** Client de session haut niveau pour l'accès aux notes Aurion. */
 export { AurionSession } from "./session";
+export { AurionPlanningGroup, AurionPlanningSubgroup, AurionAvailablePlanning } from "./promotions";
 /** Outils de cache publics du SDK. */
 export {
 	isAurionCacheEntryExpired,
@@ -40,6 +41,7 @@ export {
 	parseSidebarMenuIdForMonPlanning,
 	isPlanningEvent,
 } from "./parsers/planning";
+export { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
 export {
 	parseAurionPlanningTitle,
 	parseLocationToAddress,

@@ -13,7 +13,9 @@ import {
 	parsePlanningEvents,
 	parseSidebarMenuIdForMonPlanning,
 } from "./parsers/planning";
+import { parseAvailablePlannings, parseMenuChildren, parseSubmenuId } from "./parsers/promotions";
 import { parseDateOrThrow, parseIdInit, parseMenuId, parseViewState } from "./parsers/shared";
+import { AurionAvailablePlanning, AurionPlanningGroup, AurionPlanningSubgroup } from "./promotions";
 import { AurionTransport } from "./transport";
 import type {
 	AurionCacheStore,
@@ -63,6 +65,8 @@ export class AurionSession {
 	private readonly sessionCacheMaxAgeMs?: number;
 	private readonly planningTimeRangeApproximationMs?: number;
 	private readonly navigationNodes = new Map<AurionNavigationNodeId, AurionNavigationNode>();
+	private readonly planningGroupSnapshots = new Map<string, MainMenuSnapshot>();
+	private readonly choixPlanningSnapshots = new Map<string, ChoixPlanningSnapshot>();
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
@@ -207,6 +211,178 @@ export class AurionSession {
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
 				"Erreur inattendue durant la récupération du planning Aurion.",
+				error,
+			);
+		}
+	}
+
+	async getPlanningsGroups(): Promise<AurionPlanningGroup[]> {
+		try {
+			await this.transport.login();
+
+			const root = await this.resolveRootNavigationNode({
+				includeFormId: true,
+			});
+			const rootBody = requireRootBody(root);
+			const mainMenuSnapshot = await this.loadPlanningGroupSubmenu(MAIN_MENU_SUBMENU_ID);
+			const mainMenuBody = `${rootBody}\n${mainMenuSnapshot.body}`;
+			let groupSubmenuId = tryParseSubmenuId(mainMenuBody, "Plannings Groupés par Promotion");
+
+			if (!groupSubmenuId) {
+				const planningsSubmenuId = parseSubmenuId(mainMenuBody, "Les plannings");
+				const planningsSnapshot = await this.loadPlanningGroupSubmenu(planningsSubmenuId);
+				groupSubmenuId =
+					tryParseSubmenuId(planningsSnapshot.body, "Plannings Groupés par Promotion") ??
+					planningsSubmenuId;
+			}
+
+			const snapshot = await this.loadPlanningGroupSubmenu(groupSubmenuId);
+			const children = parseMenuChildren(snapshot.body, groupSubmenuId);
+
+			return children
+				.filter((child) => child.type === "submenu")
+				.map((child) => new AurionPlanningGroup(child.name, child.id, this));
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des groupes de planning Aurion.",
+				error,
+			);
+		}
+	}
+
+	async getSubgroups(
+		submenuId: string,
+		preState?: PlanningNavigationState,
+	): Promise<AurionPlanningSubgroup[]> {
+		try {
+			await this.transport.login();
+
+			return await this.collectPlanningSubgroups(submenuId, preState, new Set<string>());
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des sous-groupes de planning Aurion.",
+				error,
+			);
+		}
+	}
+
+	private async collectPlanningSubgroups(
+		submenuId: string,
+		_preState: PlanningNavigationState | undefined,
+		visitedSubmenuIds: Set<string>,
+	): Promise<AurionPlanningSubgroup[]> {
+		if (visitedSubmenuIds.has(submenuId)) {
+			return [];
+		}
+
+		visitedSubmenuIds.add(submenuId);
+
+		const snapshot = await this.loadPlanningGroupSubmenu(submenuId);
+		const children = parseMenuChildren(snapshot.body, submenuId);
+		const subgroups: AurionPlanningSubgroup[] = [];
+
+		for (const child of children) {
+			if (child.type === "item") {
+				subgroups.push(new AurionPlanningSubgroup(child.name, child.id, this));
+				continue;
+			}
+
+			subgroups.push(
+				...(await this.collectPlanningSubgroups(child.id, undefined, visitedSubmenuIds)),
+			);
+		}
+
+		return subgroups;
+	}
+
+	async getAvailablePlannings(menuId: string): Promise<AurionAvailablePlanning[]> {
+		try {
+			await this.transport.login();
+
+			const snapshot = await this.loadChoixPlanningSnapshot(menuId);
+			const plannings = parseAvailablePlannings(snapshot.body);
+
+			return plannings.map(
+				(planning) => new AurionAvailablePlanning(planning.name, planning.id, menuId, this),
+			);
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération des plannings disponibles Aurion.",
+				error,
+			);
+		}
+	}
+
+	async getPlanningForGroup(
+		menuId: string,
+		planningId: string,
+		options?: AurionPlanningOptions,
+	): Promise<AurionPlanningEvent[]> {
+		const exactWindow = resolvePlanningWindow(options);
+		const cacheWindow = approximatePlanningWindow(
+			exactWindow,
+			this.planningTimeRangeApproximationMs,
+		);
+		const cacheKey = createAurionValueCacheKey(
+			"session",
+			`${this.getSessionCacheScope()}:planningGroup:${menuId}:${planningId}:${serializePlanningWindow(cacheWindow)}`,
+		);
+
+		try {
+			const cached =
+				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
+			if (cached) {
+				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
+			}
+
+			await this.transport.login();
+
+			const planningDate = new Date(cacheWindow.startTimestamp);
+			const today = planningDate.toLocaleDateString("fr-FR", {
+				day: "2-digit",
+				month: "2-digit",
+				year: "numeric",
+			});
+			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
+			const year = String(planningDate.getFullYear());
+
+			const planningState = await this.loadPlanningForGroupState(menuId, planningId);
+			const response = await this.postPlanning(
+				planningState,
+				cacheWindow.startTimestamp,
+				cacheWindow.endTimestamp,
+				today,
+				week,
+				year,
+			);
+
+			const planning = parsePlanningEvents(response.body);
+			await this.writeCachedValue(cacheKey, planning);
+
+			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
+		} catch (error: unknown) {
+			if (isAurionError(error)) {
+				throw error;
+			}
+
+			throw createAurionError(
+				"AURION_UNKNOWN_ERROR",
+				"Erreur inattendue durant la récupération du planning de groupe Aurion.",
 				error,
 			);
 		}
@@ -577,6 +753,152 @@ export class AurionSession {
 		state.weekInput = parseInputValue(response.body, "form:week");
 	}
 
+	private async loadPlanningGroupSubmenu(submenuId: string): Promise<MainMenuSnapshot> {
+		const cached = this.planningGroupSnapshots.get(submenuId);
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: true,
+		});
+		const formId = requireRootFormId(root);
+		const postData = new URLSearchParams({
+			"javax.faces.partial.ajax": "true",
+			"javax.faces.source": formId,
+			"javax.faces.partial.execute": formId,
+			"javax.faces.partial.render": "form:sidebar",
+			[formId]: formId,
+			"webscolaapp.Sidebar.ID_SUBMENU": submenuId,
+			...createMainMenuCommonFields(root.idInit, "1605"),
+			...createFormFocusAndInputFields("form:j_idt773_focus", "form:j_idt773_input"),
+			"javax.faces.ViewState": root.viewState,
+		});
+
+		const response = await this.transport.request({
+			path: "/faces/MainMenuPage.xhtml",
+			method: "POST",
+			body: postData,
+			headers: PRIMEFACES_AJAX_HEADERS,
+			cache: false,
+		});
+
+		assertNavigationSuccess("getPlanningsGroups:loadSubmenu", response.status, response.url);
+
+		const snapshot = {
+			body: response.body,
+			formBody: response.body,
+			viewState: parseViewStateOrFallback(response.body, root.viewState),
+			idInit: root.idInit,
+		};
+		this.planningGroupSnapshots.set(submenuId, snapshot);
+
+		return snapshot;
+	}
+
+	private async loadChoixPlanningSnapshot(menuId: string): Promise<ChoixPlanningSnapshot> {
+		const cached = this.choixPlanningSnapshots.get(menuId);
+		if (cached) {
+			return cached;
+		}
+
+		const root = await this.resolveRootNavigationNode({
+			includeFormId: false,
+		});
+		const state = {
+			viewState: root.viewState,
+			idInit: root.idInit,
+			menuId,
+		};
+		const response = await this.postSidebarNavigation(
+			state,
+			"getAvailablePlannings:postMainSidebar",
+		);
+		const body = response.body;
+		const snapshot = {
+			body,
+			idInit: parseIdInitOrFallback(body, root.idInit),
+			viewState: parseViewStateOrFallback(body, root.viewState),
+		};
+		this.choixPlanningSnapshots.set(menuId, snapshot);
+
+		return snapshot;
+	}
+
+	private async loadPlanningForGroupState(
+		menuId: string,
+		planningId: string,
+	): Promise<PlanningNavigationState> {
+		const snapshot = await this.loadChoixPlanningSnapshot(menuId);
+		const tableId = parseChoixPlanningTableId(snapshot.body);
+		const submitButtonId = parseChoixPlanningSubmitButtonId(snapshot.body);
+		const postData = new URLSearchParams({
+			form: "form",
+			"form:largeurDivCenter": "1620",
+			"form:idInit": snapshot.idInit,
+			"form:messagesRubriqueInaccessible": "",
+			"form:search-texte": "",
+			"form:search-texte-avancer": "",
+			"form:input-expression-exacte": "",
+			"form:input-un-des-mots": "",
+			"form:input-aucun-des-mots": "",
+			"form:input-nombre-debut": "",
+			"form:input-nombre-fin": "",
+			"form:calendarDebut_input": "",
+			"form:calendarFin_input": "",
+			[`${tableId}_reflowDD`]: "0_0",
+			[`${tableId}:j_idt186:filter`]: "",
+			[`${tableId}:j_idt188:filter`]: "",
+			[`${tableId}:j_idt190:filter`]: "",
+			[`${tableId}:j_idt192:filter`]: "",
+			[`${tableId}_checkbox`]: "on",
+			[`${tableId}_selection`]: planningId,
+			[submitButtonId]: "",
+			"javax.faces.ViewState": snapshot.viewState,
+		});
+
+		const response = await this.transport.request({
+			path: "/faces/ChoixPlanning.xhtml",
+			method: "POST",
+			body: postData,
+			headers: FORM_URLENCODED_HEADERS,
+			cache: false,
+		});
+
+		assertNavigationSuccess("getPlanningForGroup:selectPlanning", response.status, response.url);
+
+		let planningPageBody = response.body;
+		let formIdPlanning = tryParseFormIdPlanning(planningPageBody);
+		if (!formIdPlanning) {
+			planningPageBody = await this.loadPlanningPageAfterGroupSelection();
+			formIdPlanning = parseFormIdPlanning(planningPageBody);
+		}
+
+		return {
+			viewState: parseViewState(planningPageBody),
+			idInit: parseIdInitOrFallback(planningPageBody, snapshot.idInit),
+			menuId,
+			formIdPlanning,
+			dateInput: parseInputValue(planningPageBody, "form:date_input"),
+			weekInput: parseInputValue(planningPageBody, "form:week"),
+		};
+	}
+
+	private async loadPlanningPageAfterGroupSelection(): Promise<string> {
+		const response = await this.transport.request({
+			path: "/faces/Planning.xhtml",
+			method: "GET",
+			headers: {
+				Referer: `${this.baseUrl}/faces/ChoixPlanning.xhtml`,
+			},
+			cache: false,
+		});
+
+		assertNavigationSuccess("getPlanningForGroup:loadPlanningPage", response.status, response.url);
+
+		return response.body;
+	}
+
 	/**
 	 * Déclenche l'appel PrimeFaces du composant agenda pour récupérer les événements.
 	 *
@@ -613,7 +935,6 @@ export class AurionSession {
 			"form:offsetFuseauNavigateur": "-7200000",
 			"form:onglets_activeIndex": "0",
 			"form:onglets_scrollState": "0",
-			...createFormFocusAndInputFields("form:j_idt244_focus", "form:j_idt244_input"),
 			"javax.faces.ViewState": state.viewState,
 		});
 
@@ -855,7 +1176,7 @@ export class AurionSession {
 	 * @throws {AurionError} Si la page racine ou ses identifiants JSF sont indisponibles.
 	 */
 	private async initializeRootNavigationState(
-		state: { viewState: string; idInit: string; formId?: string },
+		state: { viewState: string; idInit: string; formId?: string; body?: string },
 		options: { includeFormId: boolean },
 	): Promise<void> {
 		const response = await this.transport.request({
@@ -868,6 +1189,7 @@ export class AurionSession {
 
 		state.viewState = parseViewState(response.body);
 		state.idInit = parseIdInit(response.body);
+		state.body = response.body;
 
 		if (options.includeFormId) {
 			state.formId = parseFormId(response.body);
@@ -885,7 +1207,7 @@ export class AurionSession {
 	private async postSidebarNavigation(
 		state: { viewState: string; idInit: string; menuId: string },
 		step: string,
-	): Promise<void> {
+	): Promise<{ body: string }> {
 		const postData = new URLSearchParams({
 			...createMainMenuCommonFields(state.idInit),
 			...createFormFocusAndInputFields("form:j_idt773_focus", "form:j_idt773_input"),
@@ -903,6 +1225,10 @@ export class AurionSession {
 		});
 
 		assertNavigationSuccess(step, response.status, response.url);
+
+		return {
+			body: response.body,
+		};
 	}
 
 	private async withNavigationRetry<TValue>(
@@ -1004,6 +1330,20 @@ interface RootNavigationState {
 	viewState: string;
 	idInit: string;
 	formId?: string;
+	body?: string;
+}
+
+interface MainMenuSnapshot {
+	body: string;
+	formBody: string;
+	viewState: string;
+	idInit: string;
+}
+
+interface ChoixPlanningSnapshot {
+	body: string;
+	idInit: string;
+	viewState: string;
 }
 
 /** État du menu Notes résolu depuis la racine de session. */
@@ -1099,6 +1439,109 @@ function requireRootFormId(state: RootNavigationState): string {
 		"Identifiant de formulaire racine Aurion indisponible.",
 		{
 			parser: "requireRootFormId",
+		},
+	);
+}
+
+function requireRootBody(state: RootNavigationState): string {
+	if (state.body) {
+		return state.body;
+	}
+
+	throw createAurionError("AURION_NAVIGATION_ERROR", "Corps HTML racine Aurion indisponible.", {
+		parser: "requireRootBody",
+	});
+}
+
+function tryParseSubmenuId(body: string, keyword: string): string | null {
+	try {
+		return parseSubmenuId(body, keyword);
+	} catch (error: unknown) {
+		if (isAurionError(error) && error.code === "AURION_PARSING_ERROR") {
+			return null;
+		}
+
+		throw error;
+	}
+}
+
+function parseViewStateOrFallback(body: string, fallback: string): string {
+	try {
+		return parseViewState(body);
+	} catch (error: unknown) {
+		if (isAurionError(error)) {
+			return fallback;
+		}
+
+		throw error;
+	}
+}
+
+function parseIdInitOrFallback(body: string, fallback: string): string {
+	try {
+		return parseIdInit(body);
+	} catch (error: unknown) {
+		if (isAurionError(error)) {
+			return fallback;
+		}
+
+		throw error;
+	}
+}
+
+function tryParseFormIdPlanning(body: string): string | null {
+	try {
+		return parseFormIdPlanning(body);
+	} catch (error: unknown) {
+		if (isAurionError(error) && error.code === "AURION_PARSING_ERROR") {
+			return null;
+		}
+
+		throw error;
+	}
+}
+
+function parseChoixPlanningTableId(body: string): string {
+	const selectionMatch =
+		body.match(/\bname=["'](form:[^"']+)_selection["']/i) ??
+		body.match(/\bid=["'](form:[^"']+)_selection["']/i) ??
+		body.match(/\bname=["'](form:[^"']+)_checkbox["']/i) ??
+		body.match(/\bid=["'](form:[^"']+)_checkbox["']/i) ??
+		body.match(/\bname=["'](form:[^"']+)_reflowDD["']/i) ??
+		body.match(/\bid=["'](form:[^"']+)_reflowDD["']/i);
+
+	if (selectionMatch?.[1]) {
+		return selectionMatch[1];
+	}
+
+	throw createAurionError(
+		"AURION_PARSING_ERROR",
+		"Identifiant de table ChoixPlanning Aurion introuvable.",
+		{
+			parser: "parseChoixPlanningTableId",
+		},
+	);
+}
+
+function parseChoixPlanningSubmitButtonId(body: string): string {
+	for (const button of body.matchAll(/<button\b[\s\S]*?<\/button>/gi)) {
+		const markup = button[0];
+		if (!markup.includes("Voir planning")) {
+			continue;
+		}
+
+		const id =
+			markup.match(/\bname=["']([^"']+)["']/i)?.[1] ?? markup.match(/\bid=["']([^"']+)["']/i)?.[1];
+		if (id) {
+			return id;
+		}
+	}
+
+	throw createAurionError(
+		"AURION_PARSING_ERROR",
+		"Bouton Voir planning ChoixPlanning Aurion introuvable.",
+		{
+			parser: "parseChoixPlanningSubmitButtonId",
 		},
 	);
 }
