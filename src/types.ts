@@ -115,7 +115,12 @@ export interface AurionGrade {
  *
  * Les bornes sont exprimées en objets JavaScript `Date`.
  */
-export interface AurionPlanningOptions {
+export interface AurionRequestOptions {
+	/** Annule uniquement cet appel SDK et ses requêtes réseau internes. */
+	signal?: AbortSignal;
+}
+
+export interface AurionPlanningOptions extends AurionRequestOptions {
 	/** Début de la fenêtre de recherche. */
 	start?: Date;
 	/** Fin de la fenêtre de recherche. */
@@ -143,7 +148,7 @@ export interface AurionPlanningEvent {
 	/** Type de l'événement (ex. "Cours", "TP", "Examen") tel que fourni par Aurion. */
 	type: string;
 	/** Charge les détails complets de l'événement depuis la modale Aurion. */
-	getDetails(): Promise<AurionPlanningEventDetails>;
+	getDetails(options?: AurionRequestOptions): Promise<AurionPlanningEventDetails>;
 }
 
 /**

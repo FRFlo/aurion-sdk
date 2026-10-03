@@ -24,6 +24,7 @@ import type {
 	AurionPlanningEvent,
 	AurionPlanningEventDetails,
 	AurionPlanningOptions,
+	AurionRequestOptions,
 	AurionSessionOptions,
 	RawAurionAbsenceRow,
 	RawAurionGradeRow,
@@ -54,7 +55,7 @@ export class AurionSession {
 	/** Identifiant Aurion utilisé pour ouvrir la session distante. */
 	readonly username: string;
 	/** Mot de passe transmis à Aurion lors de l'authentification. */
-	readonly password: string;
+	readonly #password: string;
 	/** Indique si un store de cache est configuré pour cette session. */
 	readonly cache: boolean;
 	/** Store de cache effectivement utilisé par la session et par le transport HTTP. */
@@ -89,7 +90,7 @@ export class AurionSession {
 		const cacheConfig = resolveAurionCacheConfig(options.cache);
 
 		this.username = options.username;
-		this.password = options.password;
+		this.#password = options.password;
 		this.cache = cacheConfig.store !== null;
 		this.cacheStore = cacheConfig.store;
 		this.baseUrl = options.baseUrl ?? DEFAULT_AURION_BASE_URL;
@@ -97,7 +98,7 @@ export class AurionSession {
 		this.planningTimeRangeApproximationMs = cacheConfig.planningTimeRangeApproximationMs;
 		this.transport = new AurionTransport({
 			username: this.username,
-			password: this.password,
+			password: this.#password,
 			cacheStore: this.cacheStore,
 			cacheMaxAgeMs: cacheConfig.transportMaxAgeMs,
 			baseUrl: this.baseUrl,
@@ -116,21 +117,22 @@ export class AurionSession {
 	 * @returns La liste des notes normalisées disponibles pour le compte connecté.
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
 	 */
-	async getGrades(): Promise<AurionGrade[]> {
+	async getGrades(options?: AurionRequestOptions): Promise<AurionGrade[]> {
 		const cacheKey = createAurionValueCacheKey("session", `${this.getSessionCacheScope()}:grades`);
 
 		try {
+			throwIfAborted(options?.signal);
 			const cached = await this.readCachedValue<AurionGrade[]>(cacheKey);
 			if (cached) {
 				return cached;
 			}
 
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const rawGrades = await this.withNavigationRetry("gradesPage", async () => {
-				const state = await this.resolveGradesPageNode();
+				const state = await this.resolveGradesPageNode(options?.signal);
 
-				return this.postGrade(state);
+				return this.postGrade(state, options?.signal);
 			});
 
 			const grades = rawGrades.map((rawGrade) => toAurionGrade(rawGrade));
@@ -141,6 +143,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -174,13 +177,14 @@ export class AurionSession {
 		);
 
 		try {
+			throwIfAborted(options?.signal);
 			const cached =
 				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
 			if (cached) {
 				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
 			}
 
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const planningDate = new Date(cacheWindow.startTimestamp);
 			const today = planningDate.toLocaleDateString("fr-FR", {
@@ -192,7 +196,7 @@ export class AurionSession {
 			const year = String(planningDate.getFullYear());
 
 			const response = await this.withNavigationRetry("planningPage", async () => {
-				const state = await this.resolvePlanningPageNode();
+				const state = await this.resolvePlanningPageNode(options?.signal);
 
 				return this.postPlanning(
 					state,
@@ -201,6 +205,7 @@ export class AurionSession {
 					today,
 					week,
 					year,
+					options?.signal,
 				);
 			});
 
@@ -212,6 +217,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -221,29 +227,42 @@ export class AurionSession {
 		}
 	}
 
-	async getPlanningsGroups(): Promise<AurionPlanningGroup[]> {
+	async getPlanningsGroups(options?: AurionRequestOptions): Promise<AurionPlanningGroup[]> {
 		try {
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const root = await this.resolveRootNavigationNode({
 				includeFormId: true,
+				signal: options?.signal,
 			});
 			const rootBody = requireRootBody(root);
-			const mainMenuSnapshot = await this.loadPlanningGroupSubmenu(MAIN_MENU_SUBMENU_ID);
+			const mainMenuSnapshot = await this.loadPlanningGroupSubmenu(
+				MAIN_MENU_SUBMENU_ID,
+				undefined,
+				options?.signal,
+			);
 			const mainMenuBody = `${rootBody}\n${mainMenuSnapshot.body}`;
 			let parentSnapshot = mainMenuSnapshot;
 			let groupSubmenuId = tryParseSubmenuId(mainMenuBody, "Plannings Groupés par Promotion");
 
 			if (!groupSubmenuId) {
 				const planningsSubmenuId = parseSubmenuId(mainMenuBody, "Les plannings");
-				const planningsSnapshot = await this.loadPlanningGroupSubmenu(planningsSubmenuId);
+				const planningsSnapshot = await this.loadPlanningGroupSubmenu(
+					planningsSubmenuId,
+					undefined,
+					options?.signal,
+				);
 				parentSnapshot = planningsSnapshot;
 				groupSubmenuId =
 					tryParseSubmenuId(planningsSnapshot.body, "Plannings Groupés par Promotion") ??
 					planningsSubmenuId;
 			}
 
-			const snapshot = await this.loadPlanningGroupSubmenu(groupSubmenuId, parentSnapshot);
+			const snapshot = await this.loadPlanningGroupSubmenu(
+				groupSubmenuId,
+				parentSnapshot,
+				options?.signal,
+			);
 			const children = parseMenuChildren(snapshot.body, groupSubmenuId);
 
 			return children
@@ -256,6 +275,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -270,32 +290,55 @@ export class AurionSession {
 	 * Les événements ne sont pas chargés : chaque planning retourné peut être lu
 	 * individuellement avec `planning.getPlanning(options)`.
 	 */
-	async getAllAvailablePlannings(): Promise<AurionAvailablePlanning[]> {
-		const groups = await this.getPlanningsGroups();
+	async getAllAvailablePlannings(
+		options?: AurionRequestOptions,
+	): Promise<AurionAvailablePlanning[]> {
+		throwIfAborted(options?.signal);
+		const groups = await this.getPlanningsGroups(options);
 		const availablePlannings: AurionAvailablePlanning[] = [];
-		const subgroupBranches = await Promise.all(groups.map((group) => group.getSubgroups()));
+		const subgroupBranches = await Promise.all(groups.map((group) => group.getSubgroups(options)));
 
 		// Independent tree branches carry their own ViewState snapshots. The tree's
 		// parent-child dependencies, not an arbitrary worker cap, govern traversal.
 		// Planning selection still shares the live JSF chooser state and stays serial.
 		for (const subgroup of subgroupBranches.flat()) {
-			availablePlannings.push(...(await subgroup.getPlannings()));
+			throwIfAborted(options?.signal);
+			availablePlannings.push(...(await subgroup.getPlannings(options)));
 		}
 
 		return availablePlannings;
 	}
 
-	async getSubgroups(submenuId: string): Promise<AurionPlanningSubgroup[]> {
+	/** Alias plus court pour lister les plannings sélectionnables. */
+	async listAvailablePlannings(options?: AurionRequestOptions): Promise<AurionAvailablePlanning[]> {
+		return this.getAllAvailablePlannings(options);
+	}
+
+	/** Vide le store de cache configuré, y compris les entrées d'autres sessions partagées. */
+	async clearCache(): Promise<void> {
+		await this.cacheStore?.clear();
+	}
+
+	async getSubgroups(
+		submenuId: string,
+		options?: AurionRequestOptions,
+	): Promise<AurionPlanningSubgroup[]> {
 		try {
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const parentId = this.planningGroupParentIds.get(submenuId);
 			const parentSnapshot = parentId ? this.planningGroupSnapshots.get(parentId) : undefined;
-			return await this.collectPlanningSubgroups(submenuId, parentSnapshot, new Set<string>());
+			return await this.collectPlanningSubgroups(
+				submenuId,
+				parentSnapshot,
+				new Set<string>(),
+				options?.signal,
+			);
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -309,6 +352,7 @@ export class AurionSession {
 		submenuId: string,
 		parentSnapshot: MainMenuSnapshot | undefined,
 		visitedSubmenuIds: Set<string>,
+		signal?: AbortSignal,
 	): Promise<AurionPlanningSubgroup[]> {
 		if (visitedSubmenuIds.has(submenuId)) {
 			return [];
@@ -316,24 +360,28 @@ export class AurionSession {
 
 		visitedSubmenuIds.add(submenuId);
 
-		const snapshot = await this.loadPlanningGroupSubmenu(submenuId, parentSnapshot);
+		throwIfAborted(signal);
+		const snapshot = await this.loadPlanningGroupSubmenu(submenuId, parentSnapshot, signal);
 		const children = parseMenuChildren(snapshot.body, submenuId);
 		const childBranches = await Promise.all(
 			children.map((child) =>
 				child.type === "item"
 					? Promise.resolve([new AurionPlanningSubgroup(child.name, child.id, this)])
-					: this.collectPlanningSubgroups(child.id, snapshot, visitedSubmenuIds),
+					: this.collectPlanningSubgroups(child.id, snapshot, visitedSubmenuIds, signal),
 			),
 		);
 
 		return childBranches.flat();
 	}
 
-	async getAvailablePlannings(menuId: string): Promise<AurionAvailablePlanning[]> {
+	async getAvailablePlannings(
+		menuId: string,
+		options?: AurionRequestOptions,
+	): Promise<AurionAvailablePlanning[]> {
 		try {
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
-			const snapshot = await this.loadChoixPlanningSnapshot(menuId);
+			const snapshot = await this.loadChoixPlanningSnapshot(menuId, false, options?.signal);
 			const plannings = parseAvailablePlannings(snapshot.body);
 
 			return plannings.map(
@@ -343,6 +391,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -368,6 +417,7 @@ export class AurionSession {
 		);
 
 		try {
+			throwIfAborted(options?.signal);
 			const cached =
 				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
 			if (cached) {
@@ -377,7 +427,7 @@ export class AurionSession {
 				);
 			}
 
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const planningDate = new Date(cacheWindow.startTimestamp);
 			const today = planningDate.toLocaleDateString("fr-FR", {
@@ -388,7 +438,11 @@ export class AurionSession {
 			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
 			const year = String(planningDate.getFullYear());
 
-			const planningState = await this.loadPlanningForGroupState(menuId, planningId);
+			const planningState = await this.loadPlanningForGroupState(
+				menuId,
+				planningId,
+				options?.signal,
+			);
 			const response = await this.postPlanning(
 				planningState,
 				cacheWindow.startTimestamp,
@@ -396,6 +450,7 @@ export class AurionSession {
 				today,
 				week,
 				year,
+				options?.signal,
 			);
 
 			const planning = parsePlanningEvents(response.body);
@@ -409,6 +464,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -430,18 +486,18 @@ export class AurionSession {
 	 */
 	async getEventDetails(
 		eventId: string,
-		options?: { date?: Date },
+		options?: { date?: Date; signal?: AbortSignal },
 	): Promise<AurionPlanningEventDetails> {
 		const context = this.eventPlanningContexts.get(eventId);
 		const resolvePlanningState = context
-			? () => this.loadPlanningForGroupState(context.menuId, context.planningId)
+			? () => this.loadPlanningForGroupState(context.menuId, context.planningId, options?.signal)
 			: undefined;
 		return this.getEventDetailsWithState(eventId, options, resolvePlanningState);
 	}
 
 	private async getEventDetailsWithState(
 		eventId: string,
-		options?: { date?: Date },
+		options?: { date?: Date; signal?: AbortSignal },
 		resolvePlanningState?: () => Promise<PlanningNavigationState>,
 	): Promise<AurionPlanningEventDetails> {
 		const cacheKey = createAurionValueCacheKey(
@@ -450,19 +506,20 @@ export class AurionSession {
 		);
 
 		try {
+			throwIfAborted(options?.signal);
 			const cached = await this.readCachedValue<AurionPlanningEventDetails>(cacheKey);
 			if (cached) {
 				return cached;
 			}
 
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const response = await this.withNavigationRetry("planningPage", async () => {
 				const state = resolvePlanningState
 					? await resolvePlanningState()
-					: await this.resolvePlanningPageNode();
+					: await this.resolvePlanningPageNode(options?.signal);
 
-				return this.postEventDetails(state, eventId, options?.date);
+				return this.postEventDetails(state, eventId, options?.date, options?.signal);
 			});
 
 			const details = parseEventDetails(response.body, eventId);
@@ -473,6 +530,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -493,24 +551,25 @@ export class AurionSession {
 	 * @returns La liste des absences normalisées du compte connecté.
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
 	 */
-	async getAbsences(): Promise<AurionAbsence[]> {
+	async getAbsences(options?: AurionRequestOptions): Promise<AurionAbsence[]> {
 		const cacheKey = createAurionValueCacheKey(
 			"session",
 			`${this.getSessionCacheScope()}:absences`,
 		);
 
 		try {
+			throwIfAborted(options?.signal);
 			const cached = await this.readCachedValue<AurionAbsence[]>(cacheKey);
 			if (cached) {
 				return cached;
 			}
 
-			await this.transport.login();
+			await this.transport.login(options?.signal);
 
 			const rawAbsences = await this.withNavigationRetry("absencesPage", async () => {
-				const state = await this.resolveAbsencesPageNode();
+				const state = await this.resolveAbsencesPageNode(options?.signal);
 
-				return this.postAbsencesTable(state);
+				return this.postAbsencesTable(state, options?.signal);
 			});
 
 			const absences = rawAbsences.map((rawAbsence) => toAurionAbsence(rawAbsence));
@@ -521,6 +580,7 @@ export class AurionSession {
 			if (isAurionError(error)) {
 				throw error;
 			}
+			if (isAbortError(error) || options?.signal?.aborted) throw error;
 
 			throw createAurionError(
 				"AURION_UNKNOWN_ERROR",
@@ -545,6 +605,7 @@ export class AurionSession {
 
 	private async resolveRootNavigationNode(options: {
 		includeFormId: boolean;
+		signal?: AbortSignal;
 	}): Promise<RootNavigationState> {
 		const cached = this.readNavigationNode<RootNavigationState>("root");
 		if (cached && (!options.includeFormId || cached.formId)) {
@@ -560,13 +621,13 @@ export class AurionSession {
 			idInit: "",
 		};
 
-		await this.initializeRootNavigationState(state, options);
+		await this.initializeRootNavigationState(state, options, options.signal);
 		this.writeNavigationNode("root", null, state);
 
 		return state;
 	}
 
-	private async resolveGradesMenuNode(): Promise<GradesMenuNavigationState> {
+	private async resolveGradesMenuNode(signal?: AbortSignal): Promise<GradesMenuNavigationState> {
 		const cached = this.readNavigationNode<GradesMenuNavigationState>("gradesMenu");
 		if (cached) {
 			return cached;
@@ -574,6 +635,7 @@ export class AurionSession {
 
 		const root = await this.resolveRootNavigationNode({
 			includeFormId: true,
+			signal,
 		});
 		const state: GradesMenuNavigationState = {
 			viewState: root.viewState,
@@ -582,19 +644,19 @@ export class AurionSession {
 			menuId: "",
 		};
 
-		await this.postMainMenu(state);
+		await this.postMainMenu(state, signal);
 		this.writeNavigationNode("gradesMenu", "root", state);
 
 		return state;
 	}
 
-	private async resolveGradesPageNode(): Promise<GradesNavigationState> {
+	private async resolveGradesPageNode(signal?: AbortSignal): Promise<GradesNavigationState> {
 		const cached = this.readNavigationNode<GradesNavigationState>("gradesPage");
 		if (cached) {
 			return cached;
 		}
 
-		const menu = await this.resolveGradesMenuNode();
+		const menu = await this.resolveGradesMenuNode(signal);
 		const state: GradesNavigationState = {
 			viewState: menu.viewState,
 			idInit: menu.idInit,
@@ -603,13 +665,15 @@ export class AurionSession {
 			formIdGrade: "",
 		};
 
-		await this.postMainSidebar(state);
+		await this.postMainSidebar(state, signal);
 		this.writeNavigationNode("gradesPage", "gradesMenu", state);
 
 		return state;
 	}
 
-	private async resolvePlanningMenuNode(): Promise<PlanningMenuNavigationState> {
+	private async resolvePlanningMenuNode(
+		signal?: AbortSignal,
+	): Promise<PlanningMenuNavigationState> {
 		const cached = this.readNavigationNode<PlanningMenuNavigationState>("planningMenu");
 		if (cached) {
 			return cached;
@@ -617,6 +681,7 @@ export class AurionSession {
 
 		const root = await this.resolveRootNavigationNode({
 			includeFormId: false,
+			signal,
 		});
 		const state: PlanningMenuNavigationState = {
 			viewState: root.viewState,
@@ -624,19 +689,19 @@ export class AurionSession {
 			menuId: "",
 		};
 
-		await this.loadPlanningSidebarMenuId(state);
+		await this.loadPlanningSidebarMenuId(state, signal);
 		this.writeNavigationNode("planningMenu", "root", state);
 
 		return state;
 	}
 
-	private async resolvePlanningPageNode(): Promise<PlanningNavigationState> {
+	private async resolvePlanningPageNode(signal?: AbortSignal): Promise<PlanningNavigationState> {
 		const cached = this.readNavigationNode<PlanningNavigationState>("planningPage");
 		if (cached) {
 			return cached;
 		}
 
-		const menu = await this.resolvePlanningMenuNode();
+		const menu = await this.resolvePlanningMenuNode(signal);
 		const state: PlanningNavigationState = {
 			viewState: menu.viewState,
 			idInit: menu.idInit,
@@ -644,14 +709,14 @@ export class AurionSession {
 			formIdPlanning: "",
 		};
 
-		await this.postSidebarNavigation(state, "getPlanning:postMainSidebar");
-		await this.loadPlanningFormState(state);
+		await this.postSidebarNavigation(state, "getPlanning:postMainSidebar", signal);
+		await this.loadPlanningFormState(state, signal);
 		this.writeNavigationNode("planningPage", "planningMenu", state);
 
 		return state;
 	}
 
-	private async resolveAbsencesMenuNode(): Promise<AbsencesNavigationState> {
+	private async resolveAbsencesMenuNode(signal?: AbortSignal): Promise<AbsencesNavigationState> {
 		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesMenu");
 		if (cached) {
 			return cached;
@@ -659,6 +724,7 @@ export class AurionSession {
 
 		const root = await this.resolveRootNavigationNode({
 			includeFormId: true,
+			signal,
 		});
 		const state: AbsencesNavigationState = {
 			viewState: root.viewState,
@@ -667,19 +733,19 @@ export class AurionSession {
 			menuId: "",
 		};
 
-		await this.postAbsencesMainMenu(state);
+		await this.postAbsencesMainMenu(state, signal);
 		this.writeNavigationNode("absencesMenu", "root", state);
 
 		return state;
 	}
 
-	private async resolveAbsencesPageNode(): Promise<AbsencesNavigationState> {
+	private async resolveAbsencesPageNode(signal?: AbortSignal): Promise<AbsencesNavigationState> {
 		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesPage");
 		if (cached) {
 			return cached;
 		}
 
-		const menu = await this.resolveAbsencesMenuNode();
+		const menu = await this.resolveAbsencesMenuNode(signal);
 		const state: AbsencesNavigationState = {
 			viewState: menu.viewState,
 			idInit: menu.idInit,
@@ -687,8 +753,8 @@ export class AurionSession {
 			menuId: menu.menuId,
 		};
 
-		await this.postSidebarNavigation(state, "getAbsences:postMainSidebar");
-		await this.loadAbsencesPageState(state);
+		await this.postSidebarNavigation(state, "getAbsences:postMainSidebar", signal);
+		await this.loadAbsencesPageState(state, signal);
 		this.writeNavigationNode("absencesPage", "absencesMenu", state);
 
 		return state;
@@ -701,7 +767,10 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque l'identifiant de menu latéral est disponible.
 	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
 	 */
-	private async postMainMenu(state: GradesMenuNavigationState): Promise<void> {
+	private async postMainMenu(
+		state: GradesMenuNavigationState,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
 			"javax.faces.source": state.formId,
@@ -720,6 +789,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("postMainMenu", response.status, response.url);
@@ -733,8 +803,8 @@ export class AurionSession {
 	 * @returns Une promesse résolue une fois la page intermédiaire chargée.
 	 * @throws {AurionError} Si la navigation vers la page des notes échoue.
 	 */
-	private async postMainSidebar(state: GradesNavigationState): Promise<void> {
-		await this.postSidebarNavigation(state, "postMainSidebar:submit");
+	private async postMainSidebar(state: GradesNavigationState, signal?: AbortSignal): Promise<void> {
+		await this.postSidebarNavigation(state, "postMainSidebar:submit", signal);
 
 		const getResponse = await this.transport.request({
 			path: "/faces/ChoixIndividu.xhtml",
@@ -743,6 +813,7 @@ export class AurionSession {
 				Referer: `${this.baseUrl}/faces/ChoixIndividu.xhtml`,
 			},
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess(
@@ -762,7 +833,10 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque le menu planning est identifié.
 	 * @throws {AurionError} Si l'écran principal ou le menu planning ne peuvent pas être lus.
 	 */
-	private async loadPlanningSidebarMenuId(state: PlanningMenuNavigationState): Promise<void> {
+	private async loadPlanningSidebarMenuId(
+		state: PlanningMenuNavigationState,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MainMenuPage.xhtml",
 			method: "GET",
@@ -770,6 +844,7 @@ export class AurionSession {
 				Referer: `${this.baseUrl}/`,
 			},
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getPlanning:loadMainMenu", response.status, response.url);
@@ -783,7 +858,10 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque l'état JSF du planning est prêt.
 	 * @throws {AurionError} Si la page Planning ou ses identifiants ne peuvent pas être récupérés.
 	 */
-	private async loadPlanningFormState(state: PlanningNavigationState): Promise<void> {
+	private async loadPlanningFormState(
+		state: PlanningNavigationState,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/Planning.xhtml",
 			method: "GET",
@@ -791,6 +869,7 @@ export class AurionSession {
 				Referer: `${this.baseUrl}/faces/MainMenuPage.xhtml`,
 			},
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getPlanning:loadPlanningPage", response.status, response.url);
@@ -803,6 +882,7 @@ export class AurionSession {
 	private async loadPlanningGroupSubmenu(
 		submenuId: string,
 		parentSnapshot?: MainMenuSnapshot,
+		signal?: AbortSignal,
 	): Promise<MainMenuSnapshot> {
 		const cached = this.planningGroupSnapshots.get(submenuId);
 		if (cached) {
@@ -811,6 +891,7 @@ export class AurionSession {
 
 		const root = await this.resolveRootNavigationNode({
 			includeFormId: true,
+			signal,
 		});
 		const formId = requireRootFormId(root);
 		const postData = new URLSearchParams({
@@ -831,6 +912,7 @@ export class AurionSession {
 			body: postData,
 			headers: PRIMEFACES_AJAX_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getPlanningsGroups:loadSubmenu", response.status, response.url);
@@ -852,6 +934,7 @@ export class AurionSession {
 	private async loadChoixPlanningSnapshot(
 		menuId: string,
 		refresh = false,
+		signal?: AbortSignal,
 	): Promise<ChoixPlanningSnapshot> {
 		const cached = refresh ? undefined : this.choixPlanningSnapshots.get(menuId);
 		if (cached) {
@@ -860,6 +943,7 @@ export class AurionSession {
 
 		const root = await this.resolveRootNavigationNode({
 			includeFormId: false,
+			signal,
 		});
 		const state = {
 			viewState: root.viewState,
@@ -869,6 +953,7 @@ export class AurionSession {
 		const response = await this.postSidebarNavigation(
 			state,
 			"getAvailablePlannings:postMainSidebar",
+			signal,
 		);
 		const body = response.body;
 		const snapshot = {
@@ -884,10 +969,11 @@ export class AurionSession {
 	private async loadPlanningForGroupState(
 		menuId: string,
 		planningId: string,
+		signal?: AbortSignal,
 	): Promise<PlanningNavigationState> {
 		// La navigation de catalogue visite de nombreuses pages JSF : le ViewState
 		// d'un ancien ChoixPlanning n'est alors plus valide pour sélectionner un planning.
-		const snapshot = await this.loadChoixPlanningSnapshot(menuId, true);
+		const snapshot = await this.loadChoixPlanningSnapshot(menuId, true, signal);
 		const tableId = parseChoixPlanningTableId(snapshot.body);
 		const submitButtonId = parseChoixPlanningSubmitButtonId(snapshot.body);
 		const postData = new URLSearchParams({
@@ -921,6 +1007,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getPlanningForGroup:selectPlanning", response.status, response.url);
@@ -928,7 +1015,7 @@ export class AurionSession {
 		let planningPageBody = response.body;
 		let formIdPlanning = tryParseFormIdPlanning(planningPageBody);
 		if (!formIdPlanning) {
-			planningPageBody = await this.loadPlanningPageAfterGroupSelection();
+			planningPageBody = await this.loadPlanningPageAfterGroupSelection(signal);
 			formIdPlanning = parseFormIdPlanning(planningPageBody);
 		}
 
@@ -942,7 +1029,7 @@ export class AurionSession {
 		};
 	}
 
-	private async loadPlanningPageAfterGroupSelection(): Promise<string> {
+	private async loadPlanningPageAfterGroupSelection(signal?: AbortSignal): Promise<string> {
 		const response = await this.transport.request({
 			path: "/faces/Planning.xhtml",
 			method: "GET",
@@ -950,6 +1037,7 @@ export class AurionSession {
 				Referer: `${this.baseUrl}/faces/ChoixPlanning.xhtml`,
 			},
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getPlanningForGroup:loadPlanningPage", response.status, response.url);
@@ -976,6 +1064,7 @@ export class AurionSession {
 		today: string,
 		week: string,
 		year: string,
+		signal?: AbortSignal,
 	): Promise<{ body: string }> {
 		const sourceId = state.formIdPlanning;
 		const postData = new URLSearchParams({
@@ -1002,6 +1091,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getPlanning:postPlanning", response.status, response.url);
@@ -1023,6 +1113,7 @@ export class AurionSession {
 		state: PlanningNavigationState,
 		eventId: string,
 		date?: Date,
+		signal?: AbortSignal,
 	): Promise<{ body: string }> {
 		const sourceId = state.formIdPlanning;
 		const fallbackDate = date ?? new Date();
@@ -1057,6 +1148,7 @@ export class AurionSession {
 			body: postData,
 			headers: PRIMEFACES_AJAX_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getEventDetails:postEventSelect", response.status, response.url);
@@ -1073,7 +1165,10 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque l'entrée « Mes absences » est ciblée.
 	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
 	 */
-	private async postAbsencesMainMenu(state: AbsencesNavigationState): Promise<void> {
+	private async postAbsencesMainMenu(
+		state: AbsencesNavigationState,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
 			"javax.faces.source": state.formId,
@@ -1092,6 +1187,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getAbsences:postMainMenu", response.status, response.url);
@@ -1105,7 +1201,10 @@ export class AurionSession {
 	 * @returns Une promesse résolue lorsque la page des absences est chargée.
 	 * @throws {AurionError} Si la page MesAbsences ou ses identifiants ne peuvent pas être récupérés.
 	 */
-	private async loadAbsencesPageState(state: AbsencesNavigationState): Promise<void> {
+	private async loadAbsencesPageState(
+		state: AbsencesNavigationState,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const response = await this.transport.request({
 			path: "/faces/MesAbsences.xhtml",
 			method: "GET",
@@ -1113,6 +1212,7 @@ export class AurionSession {
 				Referer: `${this.baseUrl}/faces/MesAbsences.xhtml`,
 			},
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getAbsences:loadMesAbsences", response.status, response.url);
@@ -1128,7 +1228,10 @@ export class AurionSession {
 	 * @returns Les lignes brutes d'absences extraites de la réponse HTML.
 	 * @throws {AurionError} Si la requête ou le parsing de la table échoue.
 	 */
-	private async postAbsencesTable(state: AbsencesNavigationState): Promise<RawAurionAbsenceRow[]> {
+	private async postAbsencesTable(
+		state: AbsencesNavigationState,
+		signal?: AbortSignal,
+	): Promise<RawAurionAbsenceRow[]> {
 		const sourceId = "form:table";
 		const postData = new URLSearchParams({
 			"javax.faces.partial.ajax": "true",
@@ -1163,6 +1266,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("getAbsences:postAbsences", response.status, response.url);
@@ -1177,7 +1281,10 @@ export class AurionSession {
 	 * @returns Les lignes brutes de notes renvoyées par Aurion.
 	 * @throws {AurionError} Si la requête ou le parsing des notes échoue.
 	 */
-	private async postGrade(state: GradesNavigationState): Promise<RawAurionGradeRow[]> {
+	private async postGrade(
+		state: GradesNavigationState,
+		signal?: AbortSignal,
+	): Promise<RawAurionGradeRow[]> {
 		const tableId = state.formIdGrade;
 		const sourceId = `form:${tableId}`;
 		const postData = new URLSearchParams({
@@ -1219,6 +1326,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("postGrade", response.status, response.url);
@@ -1237,11 +1345,13 @@ export class AurionSession {
 	private async initializeRootNavigationState(
 		state: { viewState: string; idInit: string; formId?: string; body?: string },
 		options: { includeFormId: boolean },
+		signal?: AbortSignal,
 	): Promise<void> {
 		const response = await this.transport.request({
 			path: "/",
 			method: "GET",
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess("initializeSession", response.status, response.url);
@@ -1266,6 +1376,7 @@ export class AurionSession {
 	private async postSidebarNavigation(
 		state: { viewState: string; idInit: string; menuId: string },
 		step: string,
+		signal?: AbortSignal,
 	): Promise<{ body: string }> {
 		const postData = new URLSearchParams({
 			...createMainMenuCommonFields(state.idInit),
@@ -1281,6 +1392,7 @@ export class AurionSession {
 			body: postData,
 			headers: FORM_URLENCODED_HEADERS,
 			cache: false,
+			signal,
 		});
 
 		assertNavigationSuccess(step, response.status, response.url);
@@ -1383,13 +1495,23 @@ export class AurionSession {
 				this.eventPlanningContexts.set(event.id, groupContext);
 			}
 
-			const resolvePlanningState = groupContext
-				? () => this.loadPlanningForGroupState(groupContext.menuId, groupContext.planningId)
-				: undefined;
 			return {
 				...event,
-				getDetails: () =>
-					this.getEventDetailsWithState(event.id, { date: event.start }, resolvePlanningState),
+				getDetails: (options) => {
+					const resolvePlanningState = groupContext
+						? () =>
+								this.loadPlanningForGroupState(
+									groupContext.menuId,
+									groupContext.planningId,
+									options?.signal,
+								)
+						: undefined;
+					return this.getEventDetailsWithState(
+						event.id,
+						{ date: event.start, signal: options?.signal },
+						resolvePlanningState,
+					);
+				},
 			};
 		});
 	}
@@ -1695,11 +1817,26 @@ function resolvePlanningWindow(options?: AurionPlanningOptions): {
 
 	const startTimestamp = startDate.getTime();
 	const endTimestamp = endDate.getTime();
+	if (endTimestamp <= startTimestamp) {
+		throw new RangeError("Aurion planning end must be later than start.");
+	}
 
 	return {
 		startTimestamp,
 		endTimestamp,
 	};
+}
+
+function isAbortError(error: unknown): boolean {
+	return (
+		typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
+	);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+	if (signal?.aborted) {
+		throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+	}
 }
 
 /**

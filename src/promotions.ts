@@ -1,8 +1,14 @@
-import type { AurionPlanningEvent, AurionPlanningOptions } from "./types";
+import type { AurionPlanningEvent, AurionPlanningOptions, AurionRequestOptions } from "./types";
 
 export interface AurionPlanningNavigator {
-	getSubgroups(submenuId: string): Promise<AurionPlanningSubgroup[]>;
-	getAvailablePlannings(menuId: string): Promise<AurionAvailablePlanning[]>;
+	getSubgroups(
+		submenuId: string,
+		options?: AurionRequestOptions,
+	): Promise<AurionPlanningSubgroup[]>;
+	getAvailablePlannings(
+		menuId: string,
+		options?: AurionRequestOptions,
+	): Promise<AurionAvailablePlanning[]>;
 	getPlanningForGroup(
 		menuId: string,
 		planningId: string,
@@ -22,8 +28,8 @@ export class AurionPlanningGroup {
 		this.session = session;
 	}
 
-	async getSubgroups(): Promise<AurionPlanningSubgroup[]> {
-		return this.session.getSubgroups(this.id);
+	async getSubgroups(options?: AurionRequestOptions): Promise<AurionPlanningSubgroup[]> {
+		return this.session.getSubgroups(this.id, options);
 	}
 }
 
@@ -39,8 +45,8 @@ export class AurionPlanningSubgroup {
 		this.session = session;
 	}
 
-	async getPlannings(): Promise<AurionAvailablePlanning[]> {
-		return this.session.getAvailablePlannings(this.menuId);
+	async getPlannings(options?: AurionRequestOptions): Promise<AurionAvailablePlanning[]> {
+		return this.session.getAvailablePlannings(this.menuId, options);
 	}
 }
 

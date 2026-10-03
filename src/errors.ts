@@ -27,6 +27,8 @@ export interface AurionError {
 	code: AurionErrorCode;
 	/** Charge utile optionnelle contenant du contexte technique supplémentaire. */
 	details?: unknown;
+	/** Cause native de l'erreur, lorsqu'une erreur JavaScript est à l'origine du problème. */
+	cause?: unknown;
 }
 
 /**
@@ -69,5 +71,6 @@ export function createAurionError(
 		message,
 		code,
 		details,
+		...(details instanceof Error ? { cause: details } : {}),
 	};
 }

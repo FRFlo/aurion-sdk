@@ -28,6 +28,7 @@ export type {
 	AurionPlanningEvent,
 	AurionPlanningEventDetails,
 	AurionPlanningOptions,
+	AurionRequestOptions,
 	AurionSessionOptions,
 	AurionTimeRangeApproximation,
 	AurionTimeRangeApproximationUnit,

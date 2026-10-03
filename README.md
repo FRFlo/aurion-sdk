@@ -73,7 +73,8 @@ const session = new AurionSession({
 	password: process.env.AURION_PASSWORD!,
 });
 
-const grades = await session.getGrades();
+const controller = new AbortController();
+const grades = await session.getGrades({ signal: controller.signal });
 
 for (const grade of grades) {
 	console.log({
@@ -88,7 +89,7 @@ for (const grade of grades) {
 
 ### Comment récupérer les événements du planning
 
-`getPlanning()` accepte une fenêtre temporelle optionnelle. Si vous l’omettez, le SDK utilise une fenêtre par défaut qui commence 7 jours avant l’appel et se termine 60 jours après ce point de départ.
+`getPlanning()` accepte une fenêtre temporelle optionnelle. Si vous l’omettez, le SDK utilise une fenêtre par défaut qui commence 7 jours avant l’appel et se termine 60 jours après ce point de départ. Les dates fournies doivent être valides et la fin doit être postérieure au début ; sinon l’appel échoue avec une `RangeError`.
 
 ```ts
 import { AurionSession } from "aurion-sdk";
@@ -98,9 +99,11 @@ const session = new AurionSession({
 	password: process.env.AURION_PASSWORD!,
 });
 
+const controller = new AbortController();
 const planning = await session.getPlanning({
 	start: new Date("2026-04-01T00:00:00.000Z"),
 	end: new Date("2026-04-30T23:59:59.999Z"),
+	signal: controller.signal,
 });
 
 for (const event of planning) {
@@ -181,9 +184,11 @@ const session = new AurionSession({
 });
 ```
 
-Les clés de cache incluent à la fois `baseUrl` et `username`, ce qui évite les collisions entre plusieurs instances Aurion ou plusieurs comptes partageant le même stockage.
+Les clés de cache incluent à la fois `baseUrl` et `username`, ce qui évite les collisions entre plusieurs instances Aurion ou plusieurs comptes partageant le même stockage. `await session.clearCache()` vide toutefois l’intégralité du store configuré, y compris les entrées créées par d’autres sessions partageant ce store.
 
 ### Comment gérer les erreurs du SDK
+
+Les erreurs Aurion restent des objets compatibles avec `isAurionError`, et non des instances de `Error`. Quand `details` contient une erreur JavaScript native, la même valeur est également disponible dans `cause`.
 
 ```ts
 import { AurionSession, isAurionError } from "aurion-sdk";
@@ -231,23 +236,34 @@ new AurionSession(options: AurionSessionOptions)
 
 Champs de `AurionSessionOptions` :
 
-| Champ      | Type                                                | Description                                                                 |
-| ---------- | --------------------------------------------------- | --------------------------------------------------------------------------- |
-| `username` | `string`                                            | Identifiant de connexion Aurion                                             |
-| `password` | `string`                                            | Mot de passe Aurion                                                         |
-| `fetchFn`  | `typeof fetch`                                      | Implémentation personnalisée optionnelle de `fetch`                         |
-| `cache`    | `boolean \| AurionCacheStore \| AurionCacheOptions` | Configuration du cache                                                      |
-| `baseUrl`  | `string`                                            | URL optionnelle de l’instance Aurion, par défaut `https://aurion.junia.com` |
+| Champ      | Type                                                | Description                                                                                 |
+| ---------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `username` | `string`                                            | Identifiant de connexion Aurion                                                             |
+| `password` | `string`                                            | Mot de passe Aurion ; conservé comme donnée privée de la session et non exposé publiquement |
+| `fetchFn`  | `typeof fetch`                                      | Implémentation personnalisée optionnelle de `fetch`                                         |
+| `cache`    | `boolean \| AurionCacheStore \| AurionCacheOptions` | Configuration du cache                                                                      |
+| `baseUrl`  | `string`                                            | URL optionnelle de l’instance Aurion, par défaut `https://aurion.junia.com`                 |
+
+`getGrades({ signal })` et `getPlanning({ start, end, signal })` acceptent un `AbortSignal` par appel. Appelez `controller.abort()` pour annuler l’opération concernée. L’annulation s’applique aux requêtes HTTP internes à cette opération et rejette avec l’`AbortError` natif (non converti en `AurionError`). L’authentification partagée peut toutefois continuer lorsqu’elle est également utilisée par des appels concurrents.
+
+Les opérations ci-dessous reçoivent leur signal dans les options de l’appel :
+`getGrades({ signal })`, `getPlanning({ start, end, signal })`,
+`getPlanningsGroups({ signal })`, `getAllAvailablePlannings({ signal })`,
+`listAvailablePlannings({ signal })` et `getAbsences({ signal })`.
+Les méthodes de navigation des groupes et sous-groupes ainsi que
+`AurionPlanningEvent.getDetails({ signal })` acceptent aussi un signal par appel.
 
 Méthodes principales :
 
-| Méthode                      | Retour                               | Notes                                                                     |
-| ---------------------------- | ------------------------------------ | ------------------------------------------------------------------------- |
-| `getGrades()`                | `Promise<AurionGrade[]>`             | Authentifie à la demande, navigue vers les notes et parse le tableau HTML |
-| `getPlanning(options?)`      | `Promise<AurionPlanningEvent[]>`     | Charge les événements de planning sur une fenêtre fournie ou par défaut   |
-| `getPlanningsGroups()`       | `Promise<AurionPlanningGroup[]>`     | Liste les groupes visibles de plannings par promotion                     |
-| `getAllAvailablePlannings()` | `Promise<AurionAvailablePlanning[]>` | Liste tous les plannings sélectionnables sans charger leurs événements    |
-| `getAbsences()`              | `Promise<AurionAbsence[]>`           | Navigue vers les absences et renvoie des enregistrements normalisés       |
+| Méthode                              | Retour                               | Notes                                                                                                                      |
+| ------------------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `getGrades(options?)`                | `Promise<AurionGrade[]>`             | Authentifie à la demande, navigue vers les notes et parse le tableau HTML ; accepte `{ signal?: AbortSignal }`             |
+| `getPlanning(options?)`              | `Promise<AurionPlanningEvent[]>`     | Charge les événements de planning sur une fenêtre fournie ou par défaut ; accepte `start`, `end` et `signal?: AbortSignal` |
+| `getPlanningsGroups(options?)`       | `Promise<AurionPlanningGroup[]>`     | Liste les groupes visibles de plannings par promotion                                                                      |
+| `getAllAvailablePlannings(options?)` | `Promise<AurionAvailablePlanning[]>` | Liste tous les plannings sélectionnables sans charger leurs événements                                                     |
+| `listAvailablePlannings(options?)`   | `Promise<AurionAvailablePlanning[]>` | Alias de `getAllAvailablePlannings()`                                                                                      |
+| `clearCache()`                       | `Promise<void>`                      | Vide globalement le store de cache configuré, y compris les entrées des autres sessions qui le partagent                   |
+| `getAbsences(options?)`              | `Promise<AurionAbsence[]>`           | Navigue vers les absences et renvoie des enregistrements normalisés                                                        |
 
 ### Formes de données
 
@@ -298,7 +314,7 @@ interface AurionAbsence {
 
 ### Codes d’erreur
 
-Le SDK expose des erreurs structurées avec les codes normalisés suivants :
+Le SDK expose des erreurs structurées avec les codes normalisés suivants. Une `AurionError` structurée reste un objet (notamment avec `code`, `message` et `details`) ; les consommateurs doivent privilégier cette forme objet plutôt que supposer un format historique différent. Lorsque `details` est une instance native de `Error`, la même erreur d’origine est également disponible via `cause`. `isAurionError` reste la garde recommandée. Les `AbortError` natifs issus d’une annulation et les `RangeError` de validation de fenêtre ne sont pas convertis en `AurionError`.
 
 - `AURION_AUTHENTICATION_ERROR`
 - `AURION_NAVIGATION_ERROR`

@@ -28,6 +28,7 @@ interface TransportRequestOptions {
 	headers?: HeadersInit;
 	followRedirects?: boolean;
 	cache?: boolean;
+	signal?: AbortSignal;
 }
 
 /** Résultat interne d'un fetch avec suivi manuel des redirections. */
@@ -54,6 +55,29 @@ const DEFAULT_HEADERS: HeadersInit = {
 const LOGIN_PATH = "/login";
 const MAX_REDIRECTS = 10;
 
+function waitForAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+	if (!signal) return promise;
+	if (signal.aborted) return Promise.reject(signal.reason);
+
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => {
+			signal.removeEventListener("abort", onAbort);
+			reject(signal.reason);
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
 /**
  * Couche HTTP Aurion avec gestion des cookies, cache optionnel
  * et redirections manuelles.
@@ -65,7 +89,7 @@ export class AurionTransport {
 	private readonly cacheStore: AurionCacheStore | null;
 	private readonly cacheMaxAgeMs?: number;
 	private readonly username: string;
-	private readonly password: string;
+	readonly #password: string;
 	private loginPromise: Promise<void> | null = null;
 	private authenticated = false;
 
@@ -80,7 +104,7 @@ export class AurionTransport {
 		this.cacheStore = options.cacheStore;
 		this.cacheMaxAgeMs = options.cacheMaxAgeMs;
 		this.username = options.username;
-		this.password = options.password;
+		this.#password = options.password;
 	}
 
 	/**
@@ -89,20 +113,31 @@ export class AurionTransport {
 	 * @returns Une promesse résolue lorsque la session distante est prête.
 	 * @throws {AurionError} Si l'authentification ou l'initialisation réseau échoue.
 	 */
-	async login(): Promise<void> {
+	async login(signal?: AbortSignal): Promise<void> {
+		if (signal?.aborted) {
+			throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+		}
 		if (this.authenticated) {
 			return;
 		}
 
 		if (!this.loginPromise) {
-			this.loginPromise = this.loginInternal();
+			const loginPromise = this.loginInternal();
+			this.loginPromise = loginPromise;
+			void loginPromise.then(
+				() => {
+					this.authenticated = true;
+					this.loginPromise = null;
+				},
+				() => {
+					this.loginPromise = null;
+				},
+			);
 		}
 
-		try {
-			await this.loginPromise;
-			this.authenticated = true;
-		} finally {
-			this.loginPromise = null;
+		const loginPromise = this.loginPromise;
+		if (loginPromise) {
+			await waitForAbort(loginPromise, signal);
 		}
 	}
 
@@ -114,6 +149,9 @@ export class AurionTransport {
 	 * @throws {AurionError} Si le transport rencontre une erreur réseau ou de redirection.
 	 */
 	async request(options: TransportRequestOptions): Promise<AurionTransportResponse> {
+		if (options.signal?.aborted) {
+			throw options.signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+		}
 		const method = (options.method ?? "GET").toUpperCase() as HttpMethod;
 		const url = this.resolveUrl(options.path);
 		const requestBody = stringifyBody(options.body);
@@ -128,6 +166,9 @@ export class AurionTransport {
 
 		if (cacheKey && this.cacheStore) {
 			const cached = await this.cacheStore.get(cacheKey);
+			if (options.signal?.aborted) {
+				throw options.signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+			}
 			if (isAurionTransportCacheEntry(cached)) {
 				if (isAurionCacheEntryExpired(cached, this.cacheMaxAgeMs)) {
 					await this.cacheStore.delete(cacheKey);
@@ -161,6 +202,7 @@ export class AurionTransport {
 				body: requestBody,
 			},
 			followRedirects,
+			options.signal,
 		);
 
 		const body = await response.text();
@@ -199,7 +241,7 @@ export class AurionTransport {
 	private async loginInternal(): Promise<void> {
 		const payload = new URLSearchParams({
 			username: this.username,
-			password: this.password,
+			password: this.#password,
 			j_idt28: "",
 		});
 
@@ -256,6 +298,7 @@ export class AurionTransport {
 			body: string | undefined;
 		},
 		followRedirects: boolean,
+		signal?: AbortSignal,
 	): Promise<RedirectedFetchResult> {
 		let currentUrl = initialUrl;
 		let currentMethod = requestInit.method;
@@ -278,8 +321,12 @@ export class AurionTransport {
 					headers: requestHeaders,
 					body: currentBody,
 					redirect: "manual",
+					signal,
 				});
 			} catch (error: unknown) {
+				if (signal?.aborted) {
+					throw signal.reason ?? error;
+				}
 				throw createAurionError(
 					"AURION_TRANSPORT_ERROR",
 					"La requête réseau Aurion a échoué.",
