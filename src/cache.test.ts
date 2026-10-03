@@ -970,6 +970,107 @@ describe("cache configuration", () => {
 		await expect(session.getGrades()).rejects.toThrow("La requête réseau Aurion a échoué.");
 	});
 
+	test("AurionSession fans out across every independent sibling planning branch", async () => {
+		const groupBranchIds = ["submenu_1001", "submenu_1002", "submenu_1003", "submenu_1004"];
+		const nestedBranchIds = ["submenu_2001", "submenu_2002"];
+		const branchIds = [...groupBranchIds, ...nestedBranchIds];
+		const rootBody = `
+			>chargerSousMenu = function(){PrimeFaces.ab({s:"form:j_idt52",f:"form"});}
+			<input name="javax.faces.ViewState" value="view-root">
+			<input name="form:idInit" value="root-id">
+			<a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_3131476'})"><span>Les plannings</span></a>
+		`;
+		let activeGroupBranches = 0;
+		let peakGroupBranches = 0;
+		let activeNestedBranches = 0;
+		let peakNestedBranches = 0;
+		let branchRequests = 0;
+		const fetchFn = createMockFetch(async (input, init) => {
+			const url = input instanceof Request ? input.url : input.toString();
+			const method = init?.method ?? "GET";
+			const body = init?.body?.toString() ?? "";
+
+			if (url.endsWith("/login") && method === "POST") {
+				return new Response("", {
+					status: 302,
+					headers: { "Set-Cookie": "JSESSIONID=test; Path=/; HttpOnly" },
+				});
+			}
+
+			if (url.endsWith("/") && method === "GET") {
+				return new Response(rootBody, { status: 200 });
+			}
+
+			if (url.endsWith("/faces/MainMenuPage.xhtml") && method === "POST") {
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_44413")) {
+					return new Response(rootBody, { status: 200 });
+				}
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476")) {
+					return new Response(
+						`<li id="submenu_3131476"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_7465293'})"><span>Plannings Groupés par Promotion</span></a></li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-plannings]]></update>`,
+						{ status: 200 },
+					);
+				}
+				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_7465293")) {
+					const branches = groupBranchIds
+						.map(
+							(id, index) =>
+								`<li id="${id}"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'${id}'})"><span>Branch ${index + 1}</span></a><ul><li id="${id}"></li></ul></li>`,
+						)
+						.join("");
+					return new Response(
+						`<li id="submenu_7465293">${branches}</li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-groups]]></update>`,
+						{ status: 200 },
+					);
+				}
+
+				const branchId = branchIds.find((id) =>
+					body.includes(`webscolaapp.Sidebar.ID_SUBMENU=${id}`),
+				);
+				if (branchId) {
+					branchRequests += 1;
+					const isNestedBranch = nestedBranchIds.includes(branchId);
+					if (isNestedBranch) {
+						activeNestedBranches += 1;
+						peakNestedBranches = Math.max(peakNestedBranches, activeNestedBranches);
+					} else {
+						activeGroupBranches += 1;
+						peakGroupBranches = Math.max(peakGroupBranches, activeGroupBranches);
+					}
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					if (isNestedBranch) {
+						activeNestedBranches -= 1;
+					} else {
+						activeGroupBranches -= 1;
+					}
+					const nestedChildren =
+						branchId === groupBranchIds[0]
+							? nestedBranchIds
+									.map(
+										(id, index) =>
+											`<li id="${id}"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'${id}'})"><span>Nested ${index + 1}</span></a><ul><li id="${id}"></li></ul></li>`,
+									)
+									.join("")
+							: "";
+					return new Response(
+						`<li id="${branchId}">${nestedChildren}</li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-${branchId}]]></update>`,
+						{ status: 200 },
+					);
+				}
+			}
+
+			throw new Error(`Unexpected request: ${method} ${url}`);
+		});
+
+		const session = createSession(false, { fetchFn });
+		const plannings = await session.getAllAvailablePlannings();
+
+		expect(plannings).toEqual([]);
+		expect(branchRequests).toBe(groupBranchIds.length + nestedBranchIds.length);
+		expect(peakGroupBranches).toBe(groupBranchIds.length);
+		expect(peakNestedBranches).toBe(nestedBranchIds.length);
+	});
+
 	test("AurionSession navigates grouped planning API and posts captured-shaped payloads", async () => {
 		const postedBodies: string[] = [];
 		const rootBody = `
@@ -983,7 +1084,8 @@ describe("cache configuration", () => {
 			<input name="form:idInit" value="choix-id">
 			<input name="form:j_idt181_selection" value="">
 			<table><tbody>
-				<tr data-rk="60288885"><td><input name="form:j_idt181_checkbox" value="60288885"></td><td>ISEN AP3</td></tr>
+				<tr data-ri="0" data-rk="60288885"><td><input name="form:j_idt181_checkbox"></td><td><span>2627_ISEN_AP3_GR1</span></td><td><span>AP3 - Groupe 1</span></td><td><span>31/08/2027</span></td><td><span>Planning</span></td></tr>
+				<tr data-ri="1" data-rk="60288886"><td><input name="form:j_idt181_checkbox"></td><td><span>2627_ISEN_AP3_GR2</span></td><td><span>AP3 - Groupe 2</span></td><td><span>31/08/2027</span></td><td><span>Planning</span></td></tr>
 			</tbody></table>
 			<button id="form:j_idt243" name="form:j_idt243" type="submit">Voir planning</button>
 		`;
@@ -994,6 +1096,7 @@ describe("cache configuration", () => {
 			<input name="form:week" value="26-2026">
 			<script>PrimeFaces.cw("Schedule","schedule",{id:"form:j_idt118"});</script>
 		`;
+		const eventDetailsBody = await Bun.file("response-getEventDetails.xml").text();
 		const fetchFn = createMockFetch(async (input, init) => {
 			const url = input instanceof Request ? input.url : input.toString();
 			const method = init?.method ?? "GET";
@@ -1023,28 +1126,28 @@ describe("cache configuration", () => {
 
 				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476")) {
 					return new Response(
-						`<li id="submenu_3131476"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_7465293'})"><span>Plannings Groupés par Promotion</span></a><ul><li id="submenu_7465293"></li></ul></li>`,
+						`<li id="submenu_3131476"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_7465293'})"><span>Plannings Groupés par Promotion</span></a><ul><li id="submenu_7465293"></li></ul></li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-plannings-menu]]></update>`,
 						{ status: 200 },
 					);
 				}
 
 				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_7465293")) {
 					return new Response(
-						`<li id="submenu_7465293"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_9690235'})"><span>ISEN</span></a><ul><li id="submenu_9690235"></li></ul></li>`,
+						`<li id="submenu_7465293"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_9690235'})"><span>ISEN</span></a><ul><li id="submenu_9690235"></li></ul></li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-promotion-root]]></update>`,
 						{ status: 200 },
 					);
 				}
 
 				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_9690235")) {
 					return new Response(
-						`<li id="submenu_9690235"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_9690237'})"><span>AP</span></a><ul><li id="submenu_9690237"></li></ul></li>`,
+						`<li id="submenu_9690235"><a onclick="PrimeFaces.addSubmitParam('form',{'webscolaapp.Sidebar.ID_SUBMENU':'submenu_9690237'})"><span>AP</span></a><ul><li id="submenu_9690237"></li></ul></li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-isen-root]]></update>`,
 						{ status: 200 },
 					);
 				}
 
 				if (body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_9690237")) {
 					return new Response(
-						`<li id="submenu_9690237"><a onclick="PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'3_0_6_0'})"><span>AP3</span></a></li>`,
+						`<li id="submenu_9690237"><a onclick="PrimeFaces.addSubmitParam('form',{'form:sidebar':'form:sidebar','form:sidebar_menuid':'3_0_6_0'})"><span>AP3</span></a></li><update id="j_id1:javax.faces.ViewState:0"><![CDATA[view-isen-ap-root]]></update>`,
 						{ status: 200 },
 					);
 				}
@@ -1059,6 +1162,10 @@ describe("cache configuration", () => {
 			}
 
 			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
+				if (body.includes("javax.faces.partial.event=eventSelect")) {
+					return new Response(eventDetailsBody, { status: 200 });
+				}
+
 				return new Response(
 					`[{"id":"event-group","title":"Group planning","start":"2026-06-22T08:00:00.000Z","end":"2026-06-22T10:00:00.000Z","allDay":false,"editable":false,"className":"Cours"}]`,
 					{ status: 200 },
@@ -1072,16 +1179,27 @@ describe("cache configuration", () => {
 		const groups = await session.getPlanningsGroups();
 		const subgroups = await groups[0]?.getSubgroups();
 		const plannings = await subgroups?.[0]?.getPlannings();
-		const planning = await plannings?.[0]?.getPlanning({
+		const allAvailablePlannings = await session.getAllAvailablePlannings();
+		const planning = await allAvailablePlannings[0]?.getPlanning({
 			start: new Date("2026-06-22T00:00:00.000Z"),
 			end: new Date("2026-06-23T00:00:00.000Z"),
+		});
+		const eventDetails = await planning?.[0]?.getDetails();
+		const directEventDetails = await session.getEventDetails("event-group", {
+			date: planning?.[0]?.start,
 		});
 
 		expect(groups[0]?.name).toBe("ISEN");
 		expect(subgroups?.[0]?.name).toBe("AP3");
 		expect(plannings?.[0]?.id).toBe("60288885");
+		expect(allAvailablePlannings.map((availablePlanning) => availablePlanning.id)).toEqual([
+			"60288885",
+			"60288886",
+		]);
 		expect(planning?.[0]?.id).toBe("event-group");
 		expect(typeof planning?.[0]?.getDetails).toBe("function");
+		expect(eventDetails?.eventId).toBe("event-group");
+		expect(directEventDetails.eventId).toBe("event-group");
 
 		const submenuBody = postedBodies.find((body) =>
 			body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476"),
@@ -1093,6 +1211,15 @@ describe("cache configuration", () => {
 
 		expect(submenuBody).toContain("javax.faces.partial.render=form%3Asidebar");
 		expect(submenuBody).toContain("form%3Aj_idt773_input=44323");
+		expect(
+			postedBodies.find((body) => body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_7465293")),
+		).toContain("javax.faces.ViewState=view-plannings-menu");
+		expect(
+			postedBodies.find((body) => body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_9690235")),
+		).toContain("javax.faces.ViewState=view-promotion-root");
+		expect(
+			postedBodies.find((body) => body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_9690237")),
+		).toContain("javax.faces.ViewState=view-isen-root");
 		expect(choixBody).toContain("form%3Aj_idt181_checkbox=on");
 		expect(choixBody).toContain("form%3Aj_idt243=");
 		expect(choixBody).toContain("form%3Aj_idt181%3Aj_idt186%3Afilter=");

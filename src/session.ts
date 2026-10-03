@@ -66,7 +66,12 @@ export class AurionSession {
 	private readonly planningTimeRangeApproximationMs?: number;
 	private readonly navigationNodes = new Map<AurionNavigationNodeId, AurionNavigationNode>();
 	private readonly planningGroupSnapshots = new Map<string, MainMenuSnapshot>();
+	private readonly planningGroupParentIds = new Map<string, string>();
 	private readonly choixPlanningSnapshots = new Map<string, ChoixPlanningSnapshot>();
+	private readonly eventPlanningContexts = new Map<
+		string,
+		{ menuId: string; planningId: string }
+	>();
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
@@ -226,22 +231,27 @@ export class AurionSession {
 			const rootBody = requireRootBody(root);
 			const mainMenuSnapshot = await this.loadPlanningGroupSubmenu(MAIN_MENU_SUBMENU_ID);
 			const mainMenuBody = `${rootBody}\n${mainMenuSnapshot.body}`;
+			let parentSnapshot = mainMenuSnapshot;
 			let groupSubmenuId = tryParseSubmenuId(mainMenuBody, "Plannings Groupés par Promotion");
 
 			if (!groupSubmenuId) {
 				const planningsSubmenuId = parseSubmenuId(mainMenuBody, "Les plannings");
 				const planningsSnapshot = await this.loadPlanningGroupSubmenu(planningsSubmenuId);
+				parentSnapshot = planningsSnapshot;
 				groupSubmenuId =
 					tryParseSubmenuId(planningsSnapshot.body, "Plannings Groupés par Promotion") ??
 					planningsSubmenuId;
 			}
 
-			const snapshot = await this.loadPlanningGroupSubmenu(groupSubmenuId);
+			const snapshot = await this.loadPlanningGroupSubmenu(groupSubmenuId, parentSnapshot);
 			const children = parseMenuChildren(snapshot.body, groupSubmenuId);
 
 			return children
 				.filter((child) => child.type === "submenu")
-				.map((child) => new AurionPlanningGroup(child.name, child.id, this));
+				.map((child) => {
+					this.planningGroupParentIds.set(child.id, groupSubmenuId);
+					return new AurionPlanningGroup(child.name, child.id, this);
+				});
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -255,14 +265,33 @@ export class AurionSession {
 		}
 	}
 
-	async getSubgroups(
-		submenuId: string,
-		preState?: PlanningNavigationState,
-	): Promise<AurionPlanningSubgroup[]> {
+	/**
+	 * Récupère tous les plannings sélectionnables visibles dans les groupes de promotion.
+	 * Les événements ne sont pas chargés : chaque planning retourné peut être lu
+	 * individuellement avec `planning.getPlanning(options)`.
+	 */
+	async getAllAvailablePlannings(): Promise<AurionAvailablePlanning[]> {
+		const groups = await this.getPlanningsGroups();
+		const availablePlannings: AurionAvailablePlanning[] = [];
+		const subgroupBranches = await Promise.all(groups.map((group) => group.getSubgroups()));
+
+		// Independent tree branches carry their own ViewState snapshots. The tree's
+		// parent-child dependencies, not an arbitrary worker cap, govern traversal.
+		// Planning selection still shares the live JSF chooser state and stays serial.
+		for (const subgroup of subgroupBranches.flat()) {
+			availablePlannings.push(...(await subgroup.getPlannings()));
+		}
+
+		return availablePlannings;
+	}
+
+	async getSubgroups(submenuId: string): Promise<AurionPlanningSubgroup[]> {
 		try {
 			await this.transport.login();
 
-			return await this.collectPlanningSubgroups(submenuId, preState, new Set<string>());
+			const parentId = this.planningGroupParentIds.get(submenuId);
+			const parentSnapshot = parentId ? this.planningGroupSnapshots.get(parentId) : undefined;
+			return await this.collectPlanningSubgroups(submenuId, parentSnapshot, new Set<string>());
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -278,7 +307,7 @@ export class AurionSession {
 
 	private async collectPlanningSubgroups(
 		submenuId: string,
-		_preState: PlanningNavigationState | undefined,
+		parentSnapshot: MainMenuSnapshot | undefined,
 		visitedSubmenuIds: Set<string>,
 	): Promise<AurionPlanningSubgroup[]> {
 		if (visitedSubmenuIds.has(submenuId)) {
@@ -287,22 +316,17 @@ export class AurionSession {
 
 		visitedSubmenuIds.add(submenuId);
 
-		const snapshot = await this.loadPlanningGroupSubmenu(submenuId);
+		const snapshot = await this.loadPlanningGroupSubmenu(submenuId, parentSnapshot);
 		const children = parseMenuChildren(snapshot.body, submenuId);
-		const subgroups: AurionPlanningSubgroup[] = [];
+		const childBranches = await Promise.all(
+			children.map((child) =>
+				child.type === "item"
+					? Promise.resolve([new AurionPlanningSubgroup(child.name, child.id, this)])
+					: this.collectPlanningSubgroups(child.id, snapshot, visitedSubmenuIds),
+			),
+		);
 
-		for (const child of children) {
-			if (child.type === "item") {
-				subgroups.push(new AurionPlanningSubgroup(child.name, child.id, this));
-				continue;
-			}
-
-			subgroups.push(
-				...(await this.collectPlanningSubgroups(child.id, undefined, visitedSubmenuIds)),
-			);
-		}
-
-		return subgroups;
+		return childBranches.flat();
 	}
 
 	async getAvailablePlannings(menuId: string): Promise<AurionAvailablePlanning[]> {
@@ -347,7 +371,10 @@ export class AurionSession {
 			const cached =
 				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
 			if (cached) {
-				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
+				return filterPlanningEventsByWindow(
+					this.attachEventMethods(cached, { menuId, planningId }),
+					exactWindow,
+				);
 			}
 
 			await this.transport.login();
@@ -374,7 +401,10 @@ export class AurionSession {
 			const planning = parsePlanningEvents(response.body);
 			await this.writeCachedValue(cacheKey, planning);
 
-			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
+			return filterPlanningEventsByWindow(
+				this.attachEventMethods(planning, { menuId, planningId }),
+				exactWindow,
+			);
 		} catch (error: unknown) {
 			if (isAurionError(error)) {
 				throw error;
@@ -398,7 +428,22 @@ export class AurionSession {
 	 * @returns Les détails complets affichés par Aurion pour cet événement.
 	 * @throws {AurionError} Si la navigation, la requête AJAX ou le parsing échoue.
 	 */
-	async getEventDetails(eventId: string, options?: { date?: Date }): Promise<AurionPlanningEventDetails> {
+	async getEventDetails(
+		eventId: string,
+		options?: { date?: Date },
+	): Promise<AurionPlanningEventDetails> {
+		const context = this.eventPlanningContexts.get(eventId);
+		const resolvePlanningState = context
+			? () => this.loadPlanningForGroupState(context.menuId, context.planningId)
+			: undefined;
+		return this.getEventDetailsWithState(eventId, options, resolvePlanningState);
+	}
+
+	private async getEventDetailsWithState(
+		eventId: string,
+		options?: { date?: Date },
+		resolvePlanningState?: () => Promise<PlanningNavigationState>,
+	): Promise<AurionPlanningEventDetails> {
 		const cacheKey = createAurionValueCacheKey(
 			"session",
 			`${this.getSessionCacheScope()}:eventDetails:${eventId}`,
@@ -413,7 +458,9 @@ export class AurionSession {
 			await this.transport.login();
 
 			const response = await this.withNavigationRetry("planningPage", async () => {
-				const state = await this.resolvePlanningPageNode();
+				const state = resolvePlanningState
+					? await resolvePlanningState()
+					: await this.resolvePlanningPageNode();
 
 				return this.postEventDetails(state, eventId, options?.date);
 			});
@@ -753,7 +800,10 @@ export class AurionSession {
 		state.weekInput = parseInputValue(response.body, "form:week");
 	}
 
-	private async loadPlanningGroupSubmenu(submenuId: string): Promise<MainMenuSnapshot> {
+	private async loadPlanningGroupSubmenu(
+		submenuId: string,
+		parentSnapshot?: MainMenuSnapshot,
+	): Promise<MainMenuSnapshot> {
 		const cached = this.planningGroupSnapshots.get(submenuId);
 		if (cached) {
 			return cached;
@@ -770,9 +820,9 @@ export class AurionSession {
 			"javax.faces.partial.render": "form:sidebar",
 			[formId]: formId,
 			"webscolaapp.Sidebar.ID_SUBMENU": submenuId,
-			...createMainMenuCommonFields(root.idInit, "1605"),
+			...createMainMenuCommonFields(parentSnapshot?.idInit ?? root.idInit, "1605"),
 			...createFormFocusAndInputFields("form:j_idt773_focus", "form:j_idt773_input"),
-			"javax.faces.ViewState": root.viewState,
+			"javax.faces.ViewState": parentSnapshot?.viewState ?? root.viewState,
 		});
 
 		const response = await this.transport.request({
@@ -788,16 +838,22 @@ export class AurionSession {
 		const snapshot = {
 			body: response.body,
 			formBody: response.body,
-			viewState: parseViewStateOrFallback(response.body, root.viewState),
-			idInit: root.idInit,
+			viewState: parseViewStateOrFallback(
+				response.body,
+				parentSnapshot?.viewState ?? root.viewState,
+			),
+			idInit: parentSnapshot?.idInit ?? root.idInit,
 		};
 		this.planningGroupSnapshots.set(submenuId, snapshot);
 
 		return snapshot;
 	}
 
-	private async loadChoixPlanningSnapshot(menuId: string): Promise<ChoixPlanningSnapshot> {
-		const cached = this.choixPlanningSnapshots.get(menuId);
+	private async loadChoixPlanningSnapshot(
+		menuId: string,
+		refresh = false,
+	): Promise<ChoixPlanningSnapshot> {
+		const cached = refresh ? undefined : this.choixPlanningSnapshots.get(menuId);
 		if (cached) {
 			return cached;
 		}
@@ -829,7 +885,9 @@ export class AurionSession {
 		menuId: string,
 		planningId: string,
 	): Promise<PlanningNavigationState> {
-		const snapshot = await this.loadChoixPlanningSnapshot(menuId);
+		// La navigation de catalogue visite de nombreuses pages JSF : le ViewState
+		// d'un ancien ChoixPlanning n'est alors plus valide pour sélectionner un planning.
+		const snapshot = await this.loadChoixPlanningSnapshot(menuId, true);
 		const tableId = parseChoixPlanningTableId(snapshot.body);
 		const submitButtonId = parseChoixPlanningSubmitButtonId(snapshot.body);
 		const postData = new URLSearchParams({
@@ -1318,11 +1376,22 @@ export class AurionSession {
 
 	private attachEventMethods(
 		events: Array<Omit<AurionPlanningEvent, "getDetails">>,
+		groupContext?: { menuId: string; planningId: string },
 	): AurionPlanningEvent[] {
-		return events.map((event) => ({
-			...event,
-			getDetails: () => this.getEventDetails(event.id, { date: event.start }),
-		}));
+		return events.map((event) => {
+			if (groupContext) {
+				this.eventPlanningContexts.set(event.id, groupContext);
+			}
+
+			const resolvePlanningState = groupContext
+				? () => this.loadPlanningForGroupState(groupContext.menuId, groupContext.planningId)
+				: undefined;
+			return {
+				...event,
+				getDetails: () =>
+					this.getEventDetailsWithState(event.id, { date: event.start }, resolvePlanningState),
+			};
+		});
 	}
 }
 
@@ -1467,6 +1536,13 @@ function tryParseSubmenuId(body: string, keyword: string): string | null {
 }
 
 function parseViewStateOrFallback(body: string, fallback: string): string {
+	const partialResponseViewState = body.match(
+		/<update\b[^>]*id=["'][^"']*javax\.faces\.ViewState(?::\d+)?["'][^>]*>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/update>/i,
+	);
+	if (partialResponseViewState?.[1]) {
+		return partialResponseViewState[1];
+	}
+
 	try {
 		return parseViewState(body);
 	} catch (error: unknown) {

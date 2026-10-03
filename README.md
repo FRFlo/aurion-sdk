@@ -108,6 +108,29 @@ for (const event of planning) {
 }
 ```
 
+### Comment parcourir les plannings des promotions
+
+Le catalogue est limité aux groupes et plannings visibles avec le compte Aurion fourni à la session. `getPlanningsGroups()` permet de parcourir la hiérarchie ; `getAllAvailablePlannings()` fournit directement tous les plannings sélectionnables, sans charger leurs événements. Les événements restent récupérés individuellement avec `getPlanning(options)`.
+
+```ts
+const session = new AurionSession({
+	username: process.env.AURION_USERNAME!,
+	password: process.env.AURION_PASSWORD!,
+});
+
+const availablePlannings = await session.getAllAvailablePlannings();
+for (const availablePlanning of availablePlannings) {
+	console.log(availablePlanning.name, availablePlanning.id);
+	const events = await availablePlanning.getPlanning({
+		start: new Date("2026-06-22T00:00:00.000Z"),
+		end: new Date("2026-06-29T00:00:00.000Z"),
+	});
+	console.log(events);
+}
+```
+
+Pour explorer les groupes et leurs sous-groupes avant de choisir un planning, appelez `group.getSubgroups()`, puis `subgroup.getPlannings()`. `getAllAvailablePlannings()` explore en parallèle les branches de groupes indépendantes à partir de leurs snapshots JSF, sans plafond global arbitraire ; l'ordre du tree impose les dépendances parent-enfant, et la sélection des plannings reste séquentielle. La sélection d'un planning et la récupération de ses événements doivent aussi rester séquentielles sur une même session (pas avec `Promise.all`), car Aurion réutilise un état JSF mutable.
+
 ### Comment récupérer les absences
 
 ```ts
@@ -218,11 +241,13 @@ Champs de `AurionSessionOptions` :
 
 Méthodes principales :
 
-| Méthode                 | Retour                           | Notes                                                                     |
-| ----------------------- | -------------------------------- | ------------------------------------------------------------------------- |
-| `getGrades()`           | `Promise<AurionGrade[]>`         | Authentifie à la demande, navigue vers les notes et parse le tableau HTML |
-| `getPlanning(options?)` | `Promise<AurionPlanningEvent[]>` | Charge les événements de planning sur une fenêtre fournie ou par défaut   |
-| `getAbsences()`         | `Promise<AurionAbsence[]>`       | Navigue vers les absences et renvoie des enregistrements normalisés       |
+| Méthode                      | Retour                               | Notes                                                                     |
+| ---------------------------- | ------------------------------------ | ------------------------------------------------------------------------- |
+| `getGrades()`                | `Promise<AurionGrade[]>`             | Authentifie à la demande, navigue vers les notes et parse le tableau HTML |
+| `getPlanning(options?)`      | `Promise<AurionPlanningEvent[]>`     | Charge les événements de planning sur une fenêtre fournie ou par défaut   |
+| `getPlanningsGroups()`       | `Promise<AurionPlanningGroup[]>`     | Liste les groupes visibles de plannings par promotion                     |
+| `getAllAvailablePlannings()` | `Promise<AurionAvailablePlanning[]>` | Liste tous les plannings sélectionnables sans charger leurs événements    |
+| `getAbsences()`              | `Promise<AurionAbsence[]>`           | Navigue vers les absences et renvoie des enregistrements normalisés       |
 
 ### Formes de données
 

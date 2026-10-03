@@ -40,9 +40,12 @@ describe("promotion planning parsers", () => {
 	test("parseAvailablePlannings extracts planning rows", () => {
 		const body = `
 			<table><tbody>
-				<tr data-rk="60288885">
-					<td><input name="form:j_idt181_checkbox" value="60288885" /></td>
-					<td>ISEN AP3</td>
+				<tr data-ri="0" data-rk="60288885">
+					<td><input name="form:j_idt181_checkbox" /></td>
+					<td><span class="preformatted">2627_ISEN_AP3_GR1</span></td>
+					<td><span class="preformatted">AP3 - Groupe 1</span></td>
+					<td>31/08/2027</td>
+					<td>Planning</td>
 				</tr>
 			</tbody></table>
 		`;
@@ -50,7 +53,7 @@ describe("promotion planning parsers", () => {
 		expect(parseAvailablePlannings(body)).toEqual([
 			{
 				id: "60288885",
-				name: "ISEN AP3",
+				name: "AP3 - Groupe 1",
 			},
 		]);
 	});

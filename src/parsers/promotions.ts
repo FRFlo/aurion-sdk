@@ -102,7 +102,9 @@ export function parseAvailablePlannings(body: string): { id: string; name: strin
 		const cells = Array.from(row.matchAll(/<t[dh]\b[\s\S]*?>([\s\S]*?)<\/t[dh]>/gi))
 			.map((cell) => normalizeText(cell[1] ?? ""))
 			.filter((cell) => cell !== "" && cell !== "on");
-		const name = cells.at(-1) ?? normalizeText(row);
+		// ChoixPlanning affiche code, libellé, validité et type : le nom humain
+		// est le deuxième contenu de cellule, pas le dernier (ex. "Planning").
+		const name = cells.length > 2 ? cells[1] : (cells.at(-1) ?? normalizeText(row));
 		if (name) {
 			plannings.set(id, name);
 		}
