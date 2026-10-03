@@ -307,6 +307,22 @@ Le SDK expose des erreurs structurées avec les codes normalisés suivants :
 - `AURION_UNKNOWN_ERROR`
 - `AURION_NOT_IMPLEMENTED`
 
+### Benchmarks de parallélisme
+
+Le benchmark live prépare les références nécessaires, puis mélange dans un ordre pseudo-aléatoire toutes les méthodes publiques Aurion susceptibles de générer des requêtes : notes, planning personnel, absences, catalogue des promotions et plannings, sélection d'un planning, lecture d'événements et détails d'événement. Il couvre aussi les méthodes des wrappers `AurionPlanningGroup`, `AurionPlanningSubgroup`, `AurionAvailablePlanning` et `AurionPlanningEvent`. Chaque limite repart d'une session fraîche ; les résultats sont comparés au niveau séquentiel, sans afficher les valeurs personnelles ni les empreintes utilisées pour la comparaison. Les parseurs et méthodes de cache purement locaux sont exclus.
+
+```sh
+AURION_USERNAME=your-login AURION_PASSWORD=your-password bun run benchmark:parallelism
+```
+
+Par défaut, les limites testées sont `1,2,3`. Toute liste de niveaux positifs est acceptée ; le nombre de tâches du benchmark borne fonctionnellement le nombre d'appels de premier niveau actifs :
+
+```sh
+AURION_BENCH_CONCURRENCY_LEVELS=1,2,3,6,12 bun run benchmark:parallelism
+```
+
+Variables facultatives : `AURION_BENCH_TASK_COUNT` (13–40, défaut 18), `AURION_BENCH_SEED` (pour reproduire le même mélange), `AURION_BENCH_START`, `AURION_BENCH_END` et `AURION_BASE_URL`. Le tableau affiche les tâches/s, le speedup, le pic de requêtes HTTP simultanées, les erreurs et le nombre de résultats identiques au niveau 1. La limite borne les appels SDK de premier niveau : une méthode peut lancer ses propres requêtes parallèles, donc le pic HTTP observé peut la dépasser. La préparation (catalogue et recherche d'un événement) est mesurée séparément ; le test mesure une session chaude, car certaines méthodes de navigation réutilisent alors leurs instantanés. Le benchmark envoie des requêtes réelles dans une même session Aurion. Les niveaux supérieurs à 3 sont exploratoires compte tenu des erreurs ou divergences observées dans le mélange de méthodes ; arrêtez si elles se reproduisent.
+
 ## Notes
 
 - Le point d’entrée publié du package est `src/index.ts`, compilé dans `dist/`.

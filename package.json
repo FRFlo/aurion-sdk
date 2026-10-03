@@ -32,7 +32,8 @@
 		"lint:fix": "oxlint --fix",
 		"fmt": "oxfmt",
 		"fmt:check": "oxfmt --check",
-		"benchmark:navigation": "bun run bench/navigation-nodes.ts"
+		"benchmark:navigation": "bun run bench/navigation-nodes.ts",
+		"benchmark:parallelism": "bun run bench/parallelism.ts"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.3.11",
