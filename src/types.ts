@@ -1,7 +1,6 @@
 import type { AurionCacheOptions, AurionCacheStore } from "./cache";
 
-export type { AurionCacheEntry, AurionCacheStore, AurionTransportCacheEntry } from "./cache";
-export type { AurionValueCacheEntry } from "./cache";
+export type { AurionCacheEntry, AurionCacheStore } from "./cache";
 export type {
 	AurionCacheOptions,
 	AurionCacheTimeRangeApproximationOptions,

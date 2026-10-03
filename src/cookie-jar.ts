@@ -93,7 +93,7 @@ export class InMemoryCookieJar {
  * @param headers En-têtes HTTP à inspecter.
  * @returns Les lignes `Set-Cookie` détectées dans la réponse.
  */
-export function getSetCookieHeaders(headers: Headers): string[] {
+function getSetCookieHeaders(headers: Headers): string[] {
 	const extendedHeaders = headers as Headers & {
 		getSetCookie?: () => string[];
 	};
