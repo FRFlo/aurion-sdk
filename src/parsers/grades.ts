@@ -32,6 +32,13 @@ export function toAurionGrade(raw: RawAurionGradeRow): AurionGrade {
 	};
 }
 
+/**
+ * Interprète le premier nombre présent dans un champ numérique Aurion.
+ * Les espaces sont supprimés et la virgule décimale est convertie en point.
+ *
+ * @param value Texte brut du champ.
+ * @returns Le nombre fini extrait, ou `null` si aucun nombre exploitable n'est présent.
+ */
 function parseNumericField(value: string): number | null {
 	const normalized = value.replaceAll(/\s+/g, "").replace(",", ".");
 	if (!normalized) {
@@ -165,6 +172,12 @@ export function parseGrades(body: string): RawAurionGradeRow[] {
 	return parsedRows;
 }
 
+/**
+ * Extrait le texte préformaté d'une cellule, ou normalise toute la cellule à défaut.
+ *
+ * @param cell Contenu HTML de la cellule; peut être absent pour une colonne manquante.
+ * @returns Texte nettoyé, ou chaîne vide si la cellule est absente.
+ */
 function extractSpan(cell?: string): string {
 	if (!cell) {
 		return "";

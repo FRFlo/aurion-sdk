@@ -26,6 +26,14 @@ export function toAurionAbsence(raw: RawAurionAbsenceRow): AurionAbsence {
 	};
 }
 
+/**
+ * Combine la date de l'absence avec l'heure de début extraite de son intervalle.
+ *
+ * @param raw Ligne brute contenant l'heure ou l'intervalle horaire.
+ * @param date Date déjà interprétée de l'absence, utilisée comme jour de référence.
+ * @returns Une nouvelle date portant le jour fourni et l'heure de début.
+ * @throws {AurionError} Si l'heure ne contient pas une heure valide.
+ */
 function parseAbsenceTimeOrThrow(raw: RawAurionAbsenceRow, date: Date): Date {
 	const body = JSON.stringify(raw);
 	const timeRange = raw.time.trim();

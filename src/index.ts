@@ -4,6 +4,7 @@ export type { AurionError, AurionErrorCode } from "./errors";
 export { isAurionError } from "./errors";
 /** Client de session haut niveau pour l'accès aux notes Aurion. */
 export { AurionSession } from "./session";
+/** Wrappers de navigation pour les groupes, sous-groupes et plannings Aurion. */
 export { AurionPlanningGroup, AurionPlanningSubgroup, AurionAvailablePlanning } from "./promotions";
 /** Outils de cache publics du SDK. */
 export {
@@ -33,8 +34,11 @@ export type {
 	AurionTimeRangeApproximation,
 	AurionTimeRangeApproximationUnit,
 } from "./types";
+/** Parse et normalise les données de la rubrique des absences. */
 export { parseAbsences, toAurionAbsence } from "./parsers/absences";
+/** Parse et normalise les notes et les identifiants de leurs formulaires. */
 export { parseFormId, parseFormIdGrade, parseGrades, toAurionGrade } from "./parsers/grades";
+/** Parse les événements, détails et identifiants du planning Aurion. */
 export {
 	parseEventDetails,
 	parseFormIdPlanning,
@@ -42,7 +46,9 @@ export {
 	parseSidebarMenuIdForMonPlanning,
 	isPlanningEvent,
 } from "./parsers/planning";
+/** Parse les entrées de menu et les plannings groupés par promotion. */
 export { parseSubmenuId, parseMenuChildren, parseAvailablePlannings } from "./parsers/promotions";
+/** Utilitaires de conversion des titres, lieux et codes de notes. */
 export {
 	parseAurionPlanningTitle,
 	parseLocationToAddress,
@@ -50,6 +56,7 @@ export {
 	type GradeDetails,
 	parseGradeToDetails,
 } from "./utils";
+/** Utilitaires de parsing des éléments partagés des pages JSF Aurion. */
 export {
 	parseIdInit,
 	parseMenuId,

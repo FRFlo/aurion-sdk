@@ -86,6 +86,11 @@ export function parsePlanningEvents(body: string): Array<Omit<AurionPlanningEven
 	});
 }
 
+/** Repère le JSON de planning dans la réponse directe ou dans une section CDATA.
+ * @param body Réponse JSF complète.
+ * @returns Texte du tableau d'événements et sa valeur JSON décodée.
+ * @throws {AurionError} Si aucun candidat JSON de planning n'est trouvé.
+ */
 function parsePlanningEventsPayload(body: string): { payload: string; parsed: unknown } {
 	const trimmedBody = body.trim();
 	const directParsed = parsePlanningJsonCandidate(trimmedBody);
@@ -108,6 +113,10 @@ function parsePlanningEventsPayload(body: string): { payload: string; parsed: un
 	throwParsingError(body, "parsePlanningEvents", "Planning JSON payload not found");
 }
 
+/** Tente de décoder un candidat JSON et d'en extraire un tableau d'événements.
+ * @param candidate Texte candidat, tableau JSON ou objet contenant `events`.
+ * @returns Le texte et le contenu du tableau s'il est valide, sinon `null`.
+ */
 function parsePlanningJsonCandidate(
 	candidate: string,
 ): { payload: string; parsed: unknown } | null {
@@ -164,6 +173,7 @@ export function parseEventDetails(body: string, eventId: string): AurionPlanning
 	};
 }
 
+/** Forme minimale d'un événement telle qu'elle est attendue dans le JSON Aurion. */
 interface PlanningEventPayload {
 	id: string;
 	title: string;
@@ -174,6 +184,10 @@ interface PlanningEventPayload {
 	className: string;
 }
 
+/** Vérifie la forme brute nécessaire à la conversion d'un événement du planning.
+ * @param value Valeur JSON arbitraire.
+ * @returns `true` si les champs obligatoires ont les types attendus.
+ */
 function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
 	if (!isRecord(value)) {
 		return false;
@@ -190,6 +204,10 @@ function isPlanningEventPayload(value: unknown): value is PlanningEventPayload {
 	);
 }
 
+/** Détermine si une valeur est un objet non nul indexable par clés.
+ * @param value Valeur à vérifier.
+ * @returns `true` pour un objet non nul.
+ */
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
@@ -221,6 +239,12 @@ export function isPlanningEvent(value: unknown): value is AurionPlanningEvent {
 	);
 }
 
+/** Extrait le contenu CDATA d'une mise à jour partielle JSF ciblée.
+ * @param body Réponse XML partielle.
+ * @param updateId Identifiant du nœud `update` recherché.
+ * @returns Contenu HTML encapsulé dans sa section CDATA.
+ * @throws {AurionError} Si la mise à jour n'est pas présente.
+ */
 function extractPartialUpdate(body: string, updateId: string): string {
 	const escapedUpdateId = escapeRegExp(updateId);
 	const match = body.match(
@@ -238,6 +262,11 @@ function extractPartialUpdate(body: string, updateId: string): string {
 	return match[1];
 }
 
+/** Extrait et normalise la valeur associée à un libellé de la modale.
+ * @param modal HTML de la modale.
+ * @param label Libellé exact à rechercher.
+ * @returns Valeur normalisée, ou `null` si le libellé est absent ou vide.
+ */
 function extractField(modal: string, label: string): string | null {
 	const rowMatch = findLabeledValue(modal, label);
 	if (!rowMatch) {
@@ -247,6 +276,13 @@ function extractField(modal: string, label: string): string | null {
 	return normalizeNullableText(rowMatch);
 }
 
+/** Lit la date et l'heure d'une ligne de période de la modale.
+ * @param body Réponse source pour contextualiser une erreur.
+ * @param modal HTML de la modale.
+ * @param label Libellé de la borne (`Du` ou `Au`).
+ * @returns Date locale interprétée à partir des cellules de la ligne.
+ * @throws {AurionError} Si la ligne, ses cellules ou sa date sont invalides.
+ */
 function extractDateField(body: string, modal: string, label: "Du" | "Au"): Date {
 	const row = findTableRowByLabel(modal, label);
 	if (!row) {
@@ -368,12 +404,22 @@ function findTableRowByLabel(modal: string, label: string): string | null {
 	return rows.find((row) => extractCells(row)[0] === label) ?? null;
 }
 
+/** Extrait et normalise le contenu des cellules `<td>` et `<th>` d'une ligne.
+ * @param row Fragment HTML d'une ligne.
+ * @returns Valeurs des cellules dans leur ordre d'apparition.
+ */
 function extractCells(row: string): string[] {
 	return Array.from(row.matchAll(/<t[dh]\b[\s\S]*?>([\s\S]*?)<\/t[dh]>/g)).map((match) =>
 		normalizeText(match[1] ?? ""),
 	);
 }
 
+/** Trouve par identifiant un élément HTML puis en extrait le bloc complet.
+ * @param markup HTML à parcourir.
+ * @param id Identifiant recherché.
+ * @param tagName Nom de la balise attendue.
+ * @returns Bloc HTML complet, ou `null` si l'ouverture n'est pas trouvée.
+ */
 function extractElementBlockById(markup: string, id: string, tagName: string): string | null {
 	const escapedId = escapeRegExp(id);
 	const openingTag = markup.match(
@@ -386,6 +432,11 @@ function extractElementBlockById(markup: string, id: string, tagName: string): s
 	return extractElementBlock(markup.slice(openingTag.index), tagName);
 }
 
+/** Extrait le premier bloc complet d'une balise en gérant son imbrication.
+ * @param markup Fragment HTML commençant éventuellement par la balise cible.
+ * @param tagName Nom de la balise sans chevrons.
+ * @returns Bloc complet, ou `null` si le balisage ne se referme pas.
+ */
 function extractElementBlock(markup: string, tagName: string): string | null {
 	const tagPattern = new RegExp(`</?${tagName}\\b[^>]*>`, "gi");
 	let depth = 0;
@@ -410,6 +461,13 @@ function extractElementBlock(markup: string, tagName: string): string | null {
 	return null;
 }
 
+/** Interprète une date française textuelle avec jour de semaine, mois et heure.
+ * @param body Réponse d'origine utilisée dans les détails d'erreur.
+ * @param value Texte date/heure à analyser.
+ * @param field Nom du champ destiné au message d'erreur.
+ * @returns Date locale correspondante.
+ * @throws {AurionError} Si le format, le mois ou la date n'est pas reconnu.
+ */
 function parseFrenchDateText(body: string, value: string, field: string): Date {
 	const normalized = normalizeText(value).toLowerCase();
 	const match = normalized.match(
@@ -447,6 +505,10 @@ function parseFrenchDateText(body: string, value: string, field: string): Date {
 	return date;
 }
 
+/** Convertit un nom français de mois en index de mois JavaScript (janvier = 0).
+ * @param month Nom du mois, avec ou sans accent selon les formes prises en charge.
+ * @returns Index de 0 à 11, ou `null` si le nom n'est pas reconnu.
+ */
 function frenchMonthToIndex(month: string): number | null {
 	const months: Record<string, number> = {
 		janvier: 0,
@@ -469,12 +531,20 @@ function frenchMonthToIndex(month: string): number | null {
 	return months[month] ?? null;
 }
 
+/** Normalise un fragment HTML et représente son contenu vide par `null`.
+ * @param value Fragment à nettoyer.
+ * @returns Texte nettoyé, ou `null` s'il ne contient aucun texte.
+ */
 function normalizeNullableText(value: string): string | null {
 	const normalized = normalizeText(value);
 
 	return normalized === "" ? null : normalized;
 }
 
+/** Normalise un en-tête en minuscules sans diacritiques pour l'indexation des colonnes.
+ * @param value Contenu HTML de l'en-tête.
+ * @returns Texte décodé, compacté, sans accents et en minuscules.
+ */
 function normalizeHeaderText(value: string): string {
 	return decodeHtmlEntities(normalizeText(value))
 		.normalize("NFD")
@@ -482,6 +552,10 @@ function normalizeHeaderText(value: string): string {
 		.toLowerCase();
 }
 
+/** Échappe les métacaractères d'une chaîne utilisée comme texte littéral dans un motif.
+ * @param value Texte à échapper.
+ * @returns Texte échappé pour une expression régulière.
+ */
 function escapeRegExp(value: string): string {
 	return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

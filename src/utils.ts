@@ -2,10 +2,15 @@ import { createAurionError } from "./errors";
 
 /** Champs extraits du titre brut d'un événement de planning Aurion. */
 export interface ParsedAurionPlanningTitle {
+	/** Salle ou lieu de l'événement. */
 	location: string | undefined;
+	/** Texte complémentaire situé entre le lieu et la matière. */
 	additionalInfo: string | undefined;
+	/** Matière de l'événement. */
 	subject: string | undefined;
+	/** Type de cours ou d'activité. */
 	courseType: string | undefined;
+	/** Nom de l'enseignant ou intervenant. */
 	professor: string | undefined;
 }
 
@@ -14,7 +19,7 @@ export interface ParsedAurionPlanningTitle {
  * matière, type de cours et professeur.
  *
  * @param title Titre brut Aurion à découper ligne par ligne.
- * @param normalize Vaut toujours `true` dans l'API actuelle et active la normalisation des blancs.
+ * @param normalize Indique si les espaces des champs extraits sont compactés. `true` par défaut.
  * @returns Les champs sémantiques extraits du titre de planning.
  */
 export function parseAurionPlanningTitle(
@@ -69,11 +74,11 @@ function normalizeText(text: string | undefined, normalize: boolean): string | u
  * Adresse d'un bâtiment avec les champs de base pour une adresse postale française.
  */
 export interface Address {
-	/* Adresse d'un bâtiment avec les champs de base pour une adresse postale française. */
+	/** Rue et numéro du bâtiment. */
 	street: string;
-	/* Code postal de l'adresse. */
+	/** Code postal de l'adresse. */
 	postalCode: string;
-	/* Ville de l'adresse. */
+	/** Ville de l'adresse. */
 	city: string;
 }
 
@@ -138,15 +143,15 @@ export function parseLocationToAddress(location: string): Address {
  * Champs extraits du code de note brut d'une note Aurion.
  */
 export interface GradeDetails {
-	/* La première année de l'année scolaire de la note. */
+	/** Première année de l'année scolaire extraite du code. */
 	startingYear: number;
-	/* La seconde année de l'année scolaire de la note. */
+	/** Seconde année de l'année scolaire extraite du code. */
 	endingYear: number;
-	/* L'école de la note */
+	/** Code de l'école présent dans le code source. */
 	school: string;
-	/* La classe de la note */
+	/** Code de la classe présent dans le code source. */
 	class: string;
-	/* Code de la note, le reste de l'information est à extraire de ce code. */
+	/** Suffixe contenant les informations complémentaires, ou `undefined` si absent. */
 	code: string | undefined;
 }
 

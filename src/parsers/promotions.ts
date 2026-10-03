@@ -1,5 +1,6 @@
 import { normalizeText, throwParsingError } from "./shared";
 
+/** Représente une entrée enfant du menu de promotions, sous-menu ou élément navigable. */
 export interface PromotionMenuEntry {
 	type: "submenu" | "item";
 	id: string;
@@ -7,7 +8,14 @@ export interface PromotionMenuEntry {
 	isLoaded?: boolean;
 }
 
-/** Résout un identifiant de sous-menu PrimeFaces à partir d'un libellé visible. */
+/**
+ * Résout l'identifiant de sous-menu PrimeFaces associé à un libellé visible.
+ *
+ * @param body HTML du menu Aurion à parcourir.
+ * @param keyword Libellé du lien recherché, comparé après normalisation du texte.
+ * @returns Identifiant du sous-menu associé au lien trouvé.
+ * @throws {AurionError} Si le libellé ou un identifiant de sous-menu correspondant est introuvable.
+ */
 export function parseSubmenuId(body: string, keyword: string): string {
 	const normalizedKeyword = normalizeText(keyword);
 	const anchors = Array.from(body.matchAll(/<a\b[\s\S]*?<\/a>/gi));
@@ -44,7 +52,13 @@ export function parseSubmenuId(body: string, keyword: string): string {
 	});
 }
 
-/** Parse les enfants directs d'un nœud de menu Aurion. */
+/**
+ * Extrait les liens enfants directs d'un nœud de menu Aurion et déduplique les identifiants.
+ *
+ * @param body HTML complet du menu.
+ * @param parentSubmenuId Identifiant du sous-menu dont les enfants sont demandés.
+ * @returns Entrées trouvées, avec leur type, identifiant, libellé et état de chargement éventuel.
+ */
 export function parseMenuChildren(body: string, parentSubmenuId: string): PromotionMenuEntry[] {
 	const scope = extractSubmenuScope(body, parentSubmenuId) ?? body;
 	const entries = new Map<string, PromotionMenuEntry>();
@@ -81,7 +95,12 @@ export function parseMenuChildren(body: string, parentSubmenuId: string): Promot
 	return Array.from(entries.values());
 }
 
-/** Parse les plannings sélectionnables affichés dans ChoixPlanning. */
+/**
+ * Extrait les plannings sélectionnables du tableau de la page `ChoixPlanning`.
+ *
+ * @param body HTML de la page contenant les lignes de plannings.
+ * @returns Paires identifiant/libellé des plannings pour lesquels les deux valeurs sont disponibles.
+ */
 export function parseAvailablePlannings(body: string): { id: string; name: string }[] {
 	const rows = body.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? [];
 	const plannings = new Map<string, string>();
@@ -113,6 +132,11 @@ export function parseAvailablePlannings(body: string): { id: string; name: strin
 	return Array.from(plannings, ([id, name]) => ({ id, name }));
 }
 
+/** Localise le bloc `<li>` correspondant au sous-menu parent, s'il existe.
+ * @param body HTML du menu.
+ * @param parentSubmenuId Identifiant ou classe permettant de repérer le bloc.
+ * @returns Le bloc équilibré, ou `null` si le nœud n'est pas trouvé.
+ */
 function extractSubmenuScope(body: string, parentSubmenuId: string): string | null {
 	const escaped = escapeRegExp(parentSubmenuId);
 	const tagMatch = body.match(
@@ -128,6 +152,11 @@ function extractSubmenuScope(body: string, parentSubmenuId: string): string | nu
 	return extractBalancedElement(body.slice(tagMatch.index), "li");
 }
 
+/** Retrouve le bloc de liste `<li>` englobant une position dans le HTML.
+ * @param body Fragment HTML.
+ * @param childIndex Position du lien enfant dans ce fragment.
+ * @returns Le bloc équilibré trouvé, ou `null` en l'absence d'ancêtre repérable.
+ */
 function extractAncestorListItem(body: string, childIndex: number): string | null {
 	const listItemStart = body.lastIndexOf("<li", childIndex);
 	if (listItemStart === -1) {
@@ -137,6 +166,11 @@ function extractAncestorListItem(body: string, childIndex: number): string | nul
 	return extractBalancedElement(body.slice(listItemStart), "li");
 }
 
+/** Extrait le premier élément complet du type demandé en comptant ses balises imbriquées.
+ * @param markup HTML à parcourir à partir de l'ouverture potentielle.
+ * @param tagName Nom de la balise sans chevrons.
+ * @returns Le fragment équilibré, ou `null` si sa fermeture manque.
+ */
 function extractBalancedElement(markup: string, tagName: string): string | null {
 	const pattern = new RegExp(`</?${tagName}\\b[^>]*>`, "gi");
 	let depth = 0;
@@ -162,6 +196,10 @@ function extractBalancedElement(markup: string, tagName: string): string | null 
 	return null;
 }
 
+/** Cherche un identifiant de sous-menu dans les formes de paramètres PrimeFaces connues.
+ * @param markup HTML ou code JavaScript associé au lien.
+ * @returns Identifiant extrait, ou `null` si aucune forme reconnue n'apparaît.
+ */
 function extractSubmenuId(markup: string): string | null {
 	return (
 		markup.match(/webscolaapp\.Sidebar\.ID_SUBMENU["']?\s*[:=]\s*["']([^"'&]+)["']/i)?.[1] ??
@@ -172,6 +210,10 @@ function extractSubmenuId(markup: string): string | null {
 	);
 }
 
+/** Extrait l'identifiant d'élément transmis par le paramètre `form:sidebar_menuid`.
+ * @param markup HTML ou code JavaScript associé au lien.
+ * @returns Identifiant extrait, ou `null` s'il est absent.
+ */
 function extractSidebarMenuId(markup: string): string | null {
 	return (
 		markup.match(/form:sidebar_menuid["']?\s*:\s*["']([^"']+)["']/i)?.[1] ??
@@ -180,6 +222,10 @@ function extractSidebarMenuId(markup: string): string | null {
 	);
 }
 
+/** Échappe les métacaractères afin d'insérer une valeur littérale dans une expression régulière.
+ * @param value Texte à échapper.
+ * @returns Texte utilisable comme motif littéral.
+ */
 function escapeRegExp(value: string): string {
 	return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

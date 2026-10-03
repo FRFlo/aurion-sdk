@@ -60,22 +60,29 @@ export interface AurionSessionOptions {
 	baseUrl?: string;
 }
 
-/**
- * Ligne de note brute telle qu'extraite du HTML Aurion.
- *
- * Toutes les propriétés sont encore textuelles à ce stade.
- */
+/** Ligne de note brute extraite du HTML Aurion, avant conversion des valeurs. */
 export interface RawAurionGradeRow {
+	/** Date de l'évaluation telle qu'affichée dans le HTML. */
 	date: string;
+	/** Code matière ou identifiant court de l'évaluation. */
 	code: string;
+	/** Intitulé de la matière ou de l'évaluation. */
 	name: string;
+	/** Note obtenue, sous forme textuelle. */
 	grade: string;
+	/** Coefficient de la note, sous forme textuelle. */
 	coefficient: string;
+	/** Moyenne de la classe, sous forme textuelle. */
 	average: string;
+	/** Note minimale de la classe, sous forme textuelle. */
 	min: string;
+	/** Note maximale de la classe, sous forme textuelle. */
 	max: string;
+	/** Médiane de la classe, sous forme textuelle. */
 	median: string;
+	/** Écart-type de la classe, sous forme textuelle. */
 	standardDeviation: string;
+	/** Commentaire associé à la note. */
 	comment: string;
 }
 
@@ -110,20 +117,20 @@ export interface AurionGrade {
 	comment: string | null;
 }
 
-/**
- * Options de filtrage temporel pour récupérer le planning.
- *
- * Les bornes sont exprimées en objets JavaScript `Date`.
- */
+/** Options communes aux appels réseau du SDK. */
 export interface AurionRequestOptions {
 	/** Annule uniquement cet appel SDK et ses requêtes réseau internes. */
 	signal?: AbortSignal;
 }
 
+/**
+ * Options de filtrage temporel et d'annulation pour une récupération de planning.
+ * Les bornes sont facultatives et exprimées en objets JavaScript `Date`.
+ */
 export interface AurionPlanningOptions extends AurionRequestOptions {
-	/** Début de la fenêtre de recherche. */
+	/** Borne incluse de début de la fenêtre de recherche. */
 	start?: Date;
-	/** Fin de la fenêtre de recherche. */
+	/** Borne incluse de fin de la fenêtre de recherche. */
 	end?: Date;
 }
 

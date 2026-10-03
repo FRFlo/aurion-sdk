@@ -1,3 +1,4 @@
+/** Valeur renvoyée directement ou via une promesse par une opération de store. */
 type Awaitable<T> = T | Promise<T>;
 
 /**
@@ -119,12 +120,19 @@ export interface ResolvedAurionCacheConfig {
 	planningTimeRangeApproximationMs?: number;
 }
 
+/** Facteurs de conversion des unités d'approximation en millisecondes. */
 const TIME_RANGE_APPROXIMATION_UNIT_TO_MS = {
 	minute: 60_000,
 	hour: 3_600_000,
 	day: 86_400_000,
 } as const satisfies Record<AurionTimeRangeApproximationUnit, number>;
 
+/**
+ * Convertit une politique d'approximation en taille de bucket millisecondes.
+ * @param approximation Politique à convertir, ou `undefined` si aucune approximation n'est configurée.
+ * @returns La taille positive du bucket, ou `undefined` sans politique.
+ * @throws {RangeError} Si `step` n'est pas un entier positif.
+ */
 function resolveTimeRangeApproximationMs(
 	approximation: AurionTimeRangeApproximation | undefined,
 ): number | undefined {
@@ -146,18 +154,33 @@ function resolveTimeRangeApproximationMs(
 export class InMemoryAurionCache implements AurionCacheStore {
 	private readonly entries = new Map<string, AurionCacheEntry>();
 
+	/**
+	 * Lit l'entrée associée à la clé, sans modifier le cache.
+	 * @param key Clé stable de l'entrée recherchée.
+	 * @returns L'entrée trouvée, ou `undefined` si la clé est absente.
+	 */
 	get(key: string): AurionCacheEntry | undefined {
 		return this.entries.get(key);
 	}
 
+	/**
+	 * Ajoute ou remplace l'entrée associée à la clé.
+	 * @param key Clé stable sous laquelle enregistrer l'entrée.
+	 * @param value Entrée de cache à stocker.
+	 */
 	set(key: string, value: AurionCacheEntry): void {
 		this.entries.set(key, value);
 	}
 
+	/**
+	 * Supprime l'entrée associée à la clé si elle existe.
+	 * @param key Clé stable de l'entrée à supprimer.
+	 */
 	delete(key: string): void {
 		this.entries.delete(key);
 	}
 
+	/** Supprime toutes les entrées du cache. */
 	clear(): void {
 		this.entries.clear();
 	}
@@ -165,6 +188,8 @@ export class InMemoryAurionCache implements AurionCacheStore {
 
 /**
  * Détermine si une valeur respecte le contrat d'un {@link AurionCacheStore}.
+ * @param cache Valeur à tester, store direct ou configuration de cache.
+ * @returns `true` si la valeur implémente toutes les méthodes du store.
  */
 export function isAurionCacheStore(
 	cache: AurionCacheStore | AurionCacheOptions,
@@ -185,6 +210,9 @@ export function isAurionCacheStore(
 
 /**
  * Normalise la configuration publique du cache en store et TTL effectifs.
+ * @param cache Configuration fournie à la session, ou `undefined` pour désactiver le cache.
+ * @returns Store et durées de vie normalisés pour les deux couches de cache.
+ * @throws {RangeError} Si l'étape d'approximation temporelle n'est pas un entier positif.
  */
 export function resolveAurionCacheConfig(
 	cache: boolean | AurionCacheStore | AurionCacheOptions | undefined,
@@ -219,6 +247,9 @@ export function resolveAurionCacheConfig(
 
 /**
  * Résout uniquement le store de cache à partir de la configuration publique.
+ * @param cache Configuration fournie à la session, ou `undefined` pour désactiver le cache.
+ * @returns Le store effectif, ou `null` si le cache est désactivé.
+ * @throws {RangeError} Si l'étape d'approximation temporelle configurée est invalide.
  */
 export function resolveAurionCacheStore(
 	cache: boolean | AurionCacheStore | AurionCacheOptions | undefined,
@@ -228,6 +259,11 @@ export function resolveAurionCacheStore(
 
 /**
  * Construit une clé de cache pour une réponse de transport HTTP.
+ * @param scope Espace de noms isolant les caches de différentes sessions.
+ * @param method Méthode HTTP associée à la requête.
+ * @param url URL complète de la ressource.
+ * @param body Corps de requête à inclure dans la clé, s'il existe.
+ * @returns Clé stable combinant les éléments de la requête.
  */
 export function createAurionCacheKey(
 	scope: string,
@@ -240,13 +276,18 @@ export function createAurionCacheKey(
 
 /**
  * Construit une clé de cache pour une valeur métier mise en cache par la session.
+ * @param scope Espace de noms isolant les caches de différentes sessions.
+ * @param key Identifiant de la valeur métier.
+ * @returns Clé stable préfixée pour le cache de valeurs.
  */
 export function createAurionValueCacheKey(scope: string, key: string): string {
 	return `value:${scope}:${key}`;
 }
 
 /**
- * Vérifie qu'une entrée de cache correspond à une réponse de transport.
+ * Vérifie le discriminant d'une entrée et affine son type vers le cache transport.
+ * @param entry Entrée éventuelle à examiner.
+ * @returns `true` uniquement pour une entrée de type `transport`.
  */
 export function isAurionTransportCacheEntry(
 	entry: AurionCacheEntry | undefined,
@@ -255,7 +296,9 @@ export function isAurionTransportCacheEntry(
 }
 
 /**
- * Vérifie qu'une entrée de cache correspond à une valeur métier de session.
+ * Vérifie le discriminant d'une entrée et affine son type vers une valeur métier.
+ * @param entry Entrée éventuelle à examiner.
+ * @returns `true` uniquement pour une entrée de type `value`.
  */
 export function isAurionValueCacheEntry(
 	entry: AurionCacheEntry | undefined,
@@ -268,6 +311,10 @@ export function isAurionValueCacheEntry(
  *
  * Une entrée sans `createdAt` n'expire pas automatiquement, ce qui préserve la
  * compatibilité avec des stores déjà peuplés avant l'introduction des TTL.
+ * @param entry Entrée dont l'ancienneté est évaluée.
+ * @param maxAgeMs Durée de vie maximale en millisecondes, ou `undefined` pour désactiver l'expiration.
+ * @param now Instant courant en millisecondes Unix, injectable pour les tests.
+ * @returns `true` si l'entrée a dépassé sa durée de vie.
  */
 export function isAurionCacheEntryExpired(
 	entry: AurionCacheEntry,

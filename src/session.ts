@@ -62,13 +62,21 @@ export class AurionSession {
 	readonly cacheStore: AurionCacheStore | null;
 	/** URL de base de l'instance Aurion ciblée par la session. */
 	readonly baseUrl: string;
+	/** Client HTTP chargé des cookies, de l'authentification et des requêtes. */
 	private readonly transport: AurionTransport;
+	/** Durée de validité maximale des valeurs normalisées en cache. */
 	private readonly sessionCacheMaxAgeMs?: number;
+	/** Granularité utilisée pour rapprocher les fenêtres des clés de cache planning. */
 	private readonly planningTimeRangeApproximationMs?: number;
+	/** États JSF mis en cache pour la navigation standard entre les pages. */
 	private readonly navigationNodes = new Map<AurionNavigationNodeId, AurionNavigationNode>();
+	/** Instantanés des sous-menus de groupes de planning déjà parcourus. */
 	private readonly planningGroupSnapshots = new Map<string, MainMenuSnapshot>();
+	/** Relation entre chaque groupe et son sous-menu parent. */
 	private readonly planningGroupParentIds = new Map<string, string>();
+	/** Instantanés de la page de sélection des plannings, indexés par menu. */
 	private readonly choixPlanningSnapshots = new Map<string, ChoixPlanningSnapshot>();
+	/** Contexte nécessaire pour retrouver l'état JSF d'un événement de planning groupé. */
 	private readonly eventPlanningContexts = new Map<
 		string,
 		{ menuId: string; planningId: string }
@@ -85,6 +93,7 @@ export class AurionSession {
 	 * cache par la session et les réponses HTTP du transport.
 	 *
 	 * @param options Paramètres de session nécessaires pour cibler Aurion.
+	 * @throws {TypeError} Si l'URL de base fournie ne peut pas être interprétée.
 	 */
 	constructor(options: AurionSessionOptions) {
 		const cacheConfig = resolveAurionCacheConfig(options.cache);
@@ -114,8 +123,10 @@ export class AurionSession {
 	 * cache de session est configuré, une valeur encore valide peut être renvoyée
 	 * directement ; une entrée expirée est supprimée puis recalculée.
 	 *
+	 * @param options Options de l'appel, dont le signal d'annulation facultatif.
 	 * @returns La liste des notes normalisées disponibles pour le compte connecté.
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé avant sa fin.
 	 */
 	async getGrades(options?: AurionRequestOptions): Promise<AurionGrade[]> {
 		const cacheKey = createAurionValueCacheKey("session", `${this.getSessionCacheScope()}:grades`);
@@ -164,6 +175,8 @@ export class AurionSession {
 	 * @param options Bornes temporelles optionnelles en objets natifs `Date`.
 	 * @returns La liste des événements de planning normalisés.
 	 * @throws {AurionError} Si une étape réseau, de navigation ou de parsing échoue.
+	 * @throws {RangeError} Si les dates sont invalides ou si la fin ne suit pas le début.
+	 * @throws {AbortError} Si le signal de cet appel est annulé avant sa fin.
 	 */
 	async getPlanning(options?: AurionPlanningOptions): Promise<AurionPlanningEvent[]> {
 		const exactWindow = resolvePlanningWindow(options);
@@ -227,6 +240,14 @@ export class AurionSession {
 		}
 	}
 
+	/**
+	 * Liste les groupes de plannings visibles dans la navigation Aurion.
+	 *
+	 * @param options Options de l'appel, dont le signal d'annulation facultatif.
+	 * @returns Les groupes de plannings de promotion accessibles au compte connecté.
+	 * @throws {AurionError} Si l'authentification, la navigation ou l'analyse du menu échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé avant sa fin.
+	 */
 	async getPlanningsGroups(options?: AurionRequestOptions): Promise<AurionPlanningGroup[]> {
 		try {
 			await this.transport.login(options?.signal);
@@ -289,6 +310,11 @@ export class AurionSession {
 	 * Récupère tous les plannings sélectionnables visibles dans les groupes de promotion.
 	 * Les événements ne sont pas chargés : chaque planning retourné peut être lu
 	 * individuellement avec `planning.getPlanning(options)`.
+	 *
+	 * @param options Options partagées avec les appels de navigation imbriqués.
+	 * @returns Tous les plannings accessibles dans les groupes et sous-groupes.
+	 * @throws {AurionError} Si l'authentification, la navigation ou l'analyse échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
 	 */
 	async getAllAvailablePlannings(
 		options?: AurionRequestOptions,
@@ -309,16 +335,38 @@ export class AurionSession {
 		return availablePlannings;
 	}
 
-	/** Alias plus court pour lister les plannings sélectionnables. */
+	/**
+	 * Alias de {@link getAllAvailablePlannings}.
+	 * @param options Options de l'appel, dont le signal d'annulation facultatif.
+	 * @returns Les plannings sélectionnables sans leurs événements.
+	 * @throws {AurionError} Si la récupération des plannings échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
+	 */
 	async listAvailablePlannings(options?: AurionRequestOptions): Promise<AurionAvailablePlanning[]> {
 		return this.getAllAvailablePlannings(options);
 	}
 
-	/** Vide le store de cache configuré, y compris les entrées d'autres sessions partagées. */
+	/**
+	 * Vide globalement le store de cache configuré.
+	 *
+	 * Cette opération supprime également les entrées créées par d'autres sessions
+	 * qui partagent le même store. Sans store configuré, elle ne fait rien.
+	 *
+	 * @returns Une promesse résolue lorsque le store a été vidé.
+	 */
 	async clearCache(): Promise<void> {
 		await this.cacheStore?.clear();
 	}
 
+	/**
+	 * Récupère les sous-groupes feuilles d'un sous-menu de planning.
+	 *
+	 * @param submenuId Identifiant du sous-menu Aurion à parcourir.
+	 * @param options Options de l'appel, dont le signal d'annulation facultatif.
+	 * @returns Les sous-groupes de planning trouvés sous ce menu.
+	 * @throws {AurionError} Si l'authentification, la navigation ou l'analyse échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
+	 */
 	async getSubgroups(
 		submenuId: string,
 		options?: AurionRequestOptions,
@@ -348,6 +396,15 @@ export class AurionSession {
 		}
 	}
 
+	/**
+	 * Parcourt récursivement les branches d'un sous-menu de plannings.
+	 *
+	 * @param submenuId Identifiant du sous-menu à parcourir.
+	 * @param parentSnapshot Instantané JSF du parent, s'il est déjà disponible.
+	 * @param visitedSubmenuIds Identifiants déjà visités pour éviter les cycles.
+	 * @param signal Signal d'annulation partagé par l'opération appelante.
+	 * @returns Les sous-groupes feuilles trouvés dans l'arbre.
+	 */
 	private async collectPlanningSubgroups(
 		submenuId: string,
 		parentSnapshot: MainMenuSnapshot | undefined,
@@ -374,6 +431,15 @@ export class AurionSession {
 		return childBranches.flat();
 	}
 
+	/**
+	 * Liste les plannings sélectionnables d'un menu donné.
+	 *
+	 * @param menuId Identifiant du menu de planning à ouvrir.
+	 * @param options Options de l'appel, dont le signal d'annulation facultatif.
+	 * @returns Les plannings disponibles dans ce menu.
+	 * @throws {AurionError} Si l'authentification, la navigation ou l'analyse échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
+	 */
 	async getAvailablePlannings(
 		menuId: string,
 		options?: AurionRequestOptions,
@@ -401,6 +467,17 @@ export class AurionSession {
 		}
 	}
 
+	/**
+	 * Récupère les événements d'un planning sélectionné dans le catalogue de groupes.
+	 *
+	 * @param menuId Identifiant du menu qui contient le planning.
+	 * @param planningId Identifiant du planning à sélectionner.
+	 * @param options Fenêtre de dates et options d'annulation facultatives.
+	 * @returns Les événements du planning de groupe dans la fenêtre demandée.
+	 * @throws {AurionError} Si la navigation ou le parsing des événements échoue.
+	 * @throws {RangeError} Si les bornes de dates sont invalides ou mal ordonnées.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
+	 */
 	async getPlanningForGroup(
 		menuId: string,
 		planningId: string,
@@ -481,8 +558,10 @@ export class AurionSession {
 	 * faire rendre la modale `form:modaleDetail`, puis parse son contenu.
 	 *
 	 * @param eventId Identifiant de l'événement à détailler.
+	 * @param options Date de référence et signal d'annulation facultatifs.
 	 * @returns Les détails complets affichés par Aurion pour cet événement.
 	 * @throws {AurionError} Si la navigation, la requête AJAX ou le parsing échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
 	 */
 	async getEventDetails(
 		eventId: string,
@@ -495,6 +574,15 @@ export class AurionSession {
 		return this.getEventDetailsWithState(eventId, options, resolvePlanningState);
 	}
 
+	/**
+	 * Charge et met en cache les détails d'un événement en utilisant l'état fourni.
+	 *
+	 * @param eventId Identifiant de l'événement Aurion.
+	 * @param options Date de référence et signal d'annulation facultatifs.
+	 * @param resolvePlanningState Résolveur d'état JSF propre au planning, le cas échéant.
+	 * @returns Les informations normalisées de l'événement.
+	 * @throws {AurionError} Si la requête, la navigation ou le parsing échoue.
+	 */
 	private async getEventDetailsWithState(
 		eventId: string,
 		options?: { date?: Date; signal?: AbortSignal },
@@ -548,8 +636,10 @@ export class AurionSession {
 	 * cache de session est actif, une valeur valide peut être réutilisée ; une
 	 * entrée expirée est supprimée avant de relancer la récupération.
 	 *
+	 * @param options Options de l'appel, dont le signal d'annulation facultatif.
 	 * @returns La liste des absences normalisées du compte connecté.
 	 * @throws {AurionError} Si l'authentification, la navigation ou le parsing échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé.
 	 */
 	async getAbsences(options?: AurionRequestOptions): Promise<AurionAbsence[]> {
 		const cacheKey = createAurionValueCacheKey(
@@ -591,11 +681,11 @@ export class AurionSession {
 	}
 
 	/**
-	 * Charge la page initiale et extrait les identifiants de session JSF.
+	 * Initialise la navigation de notes à partir de la page racine Aurion.
 	 *
-	 * @param state État de navigation des notes à compléter.
-	 * @returns Une promesse résolue une fois les identifiants racine chargés.
-	 * @throws {AurionError} Si la page initiale ou ses identifiants JSF ne peuvent pas être récupérés.
+	 * @param state État de navigation à remplir.
+	 * @returns Une promesse résolue lorsque l'état racine est prêt.
+	 * @throws {AurionError} Si le chargement de la page racine échoue.
 	 */
 	private async initializeSession(state: GradesNavigationState): Promise<void> {
 		await this.initializeRootNavigationState(state, {
@@ -603,6 +693,13 @@ export class AurionSession {
 		});
 	}
 
+	/**
+	 * Renvoie l'instantané de navigation racine ou le reconstruit s'il manque.
+	 *
+	 * @param options Indique si le formulaire racine est nécessaire et transmet l'annulation.
+	 * @returns L'état JSF racine, éventuellement enrichi du formulaire et du HTML.
+	 * @throws {AurionError} Si la page racine ou ses identifiants ne peuvent être lus.
+	 */
 	private async resolveRootNavigationNode(options: {
 		includeFormId: boolean;
 		signal?: AbortSignal;
@@ -627,6 +724,11 @@ export class AurionSession {
 		return state;
 	}
 
+	/**
+	 * Résout et mémorise l'état du menu Notes à partir de la racine.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
+	 * @returns L'état JSF du menu Notes.
+	 */
 	private async resolveGradesMenuNode(signal?: AbortSignal): Promise<GradesMenuNavigationState> {
 		const cached = this.readNavigationNode<GradesMenuNavigationState>("gradesMenu");
 		if (cached) {
@@ -650,6 +752,11 @@ export class AurionSession {
 		return state;
 	}
 
+	/**
+	 * Résout l'état JSF nécessaire à l'ouverture de la page des notes.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
+	 * @returns L'état JSF de la page des notes.
+	 */
 	private async resolveGradesPageNode(signal?: AbortSignal): Promise<GradesNavigationState> {
 		const cached = this.readNavigationNode<GradesNavigationState>("gradesPage");
 		if (cached) {
@@ -671,6 +778,11 @@ export class AurionSession {
 		return state;
 	}
 
+	/**
+	 * Résout l'état du menu de navigation du planning personnel.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
+	 * @returns L'état JSF du menu planning.
+	 */
 	private async resolvePlanningMenuNode(
 		signal?: AbortSignal,
 	): Promise<PlanningMenuNavigationState> {
@@ -695,6 +807,11 @@ export class AurionSession {
 		return state;
 	}
 
+	/**
+	 * Résout l'état JSF complet de la page du planning personnel.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
+	 * @returns L'état JSF prêt à charger les événements du planning personnel.
+	 */
 	private async resolvePlanningPageNode(signal?: AbortSignal): Promise<PlanningNavigationState> {
 		const cached = this.readNavigationNode<PlanningNavigationState>("planningPage");
 		if (cached) {
@@ -716,6 +833,11 @@ export class AurionSession {
 		return state;
 	}
 
+	/**
+	 * Résout et mémorise l'état du menu « Mes absences ».
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
+	 * @returns L'état JSF du menu des absences.
+	 */
 	private async resolveAbsencesMenuNode(signal?: AbortSignal): Promise<AbsencesNavigationState> {
 		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesMenu");
 		if (cached) {
@@ -739,6 +861,11 @@ export class AurionSession {
 		return state;
 	}
 
+	/**
+	 * Résout l'état JSF nécessaire à la page des absences.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
+	 * @returns L'état JSF de la page des absences.
+	 */
 	private async resolveAbsencesPageNode(signal?: AbortSignal): Promise<AbsencesNavigationState> {
 		const cached = this.readNavigationNode<AbsencesNavigationState>("absencesPage");
 		if (cached) {
@@ -764,6 +891,7 @@ export class AurionSession {
 	 * Ouvre le sous-menu principal qui mène à la zone des notes.
 	 *
 	 * @param state État de navigation des notes contenant les identifiants JSF actifs.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque l'identifiant de menu latéral est disponible.
 	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
 	 */
@@ -800,6 +928,7 @@ export class AurionSession {
 	 * Navigue vers ChoixIndividu et prépare l'identifiant de table des notes.
 	 *
 	 * @param state État de navigation des notes à enrichir.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue une fois la page intermédiaire chargée.
 	 * @throws {AurionError} Si la navigation vers la page des notes échoue.
 	 */
@@ -830,6 +959,7 @@ export class AurionSession {
 	 * Charge l'écran principal puis extrait l'identifiant de menu « Mon Planning ».
 	 *
 	 * @param state État de navigation du planning à mettre à jour.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque le menu planning est identifié.
 	 * @throws {AurionError} Si l'écran principal ou le menu planning ne peuvent pas être lus.
 	 */
@@ -855,6 +985,7 @@ export class AurionSession {
 	 * Ouvre la page Planning et extrait les identifiants JSF requis pour la requête agenda.
 	 *
 	 * @param state État de navigation du planning à compléter.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque l'état JSF du planning est prêt.
 	 * @throws {AurionError} Si la page Planning ou ses identifiants ne peuvent pas être récupérés.
 	 */
@@ -879,6 +1010,15 @@ export class AurionSession {
 		state.weekInput = parseInputValue(response.body, "form:week");
 	}
 
+	/**
+	 * Charge ou réutilise l'instantané JSF d'un sous-menu de planning.
+	 *
+	 * @param submenuId Identifiant du sous-menu à charger.
+	 * @param parentSnapshot Instantané parent utilisé pour conserver le ViewState.
+	 * @param signal Signal d'annulation de l'opération appelante.
+	 * @returns L'instantané de la réponse, conservé pour la navigation descendante.
+	 * @throws {AurionError} Si la requête ou l'analyse de navigation échoue.
+	 */
 	private async loadPlanningGroupSubmenu(
 		submenuId: string,
 		parentSnapshot?: MainMenuSnapshot,
@@ -931,6 +1071,15 @@ export class AurionSession {
 		return snapshot;
 	}
 
+	/**
+	 * Charge ou réutilise l'instantané de la page ChoixPlanning d'un menu.
+	 *
+	 * @param menuId Identifiant du menu de planning.
+	 * @param refresh Force le rechargement même si un instantané est en cache.
+	 * @param signal Signal d'annulation de l'opération appelante.
+	 * @returns Le corps et les identifiants JSF extraits de la page.
+	 * @throws {AurionError} Si la navigation vers la page échoue.
+	 */
 	private async loadChoixPlanningSnapshot(
 		menuId: string,
 		refresh = false,
@@ -966,6 +1115,15 @@ export class AurionSession {
 		return snapshot;
 	}
 
+	/**
+	 * Sélectionne un planning du catalogue et construit son état JSF actif.
+	 *
+	 * @param menuId Identifiant du menu contenant le planning.
+	 * @param planningId Identifiant du planning à sélectionner.
+	 * @param signal Signal d'annulation de l'opération appelante.
+	 * @returns L'état JSF prêt à charger les événements du planning.
+	 * @throws {AurionError} Si la sélection ou l'analyse de la page échoue.
+	 */
 	private async loadPlanningForGroupState(
 		menuId: string,
 		planningId: string,
@@ -1029,6 +1187,13 @@ export class AurionSession {
 		};
 	}
 
+	/**
+	 * Charge directement la page Planning après une sélection sans réponse complète.
+	 *
+	 * @param signal Signal d'annulation de l'opération appelante.
+	 * @returns Le HTML de la page planning.
+	 * @throws {AurionError} Si la requête de la page échoue.
+	 */
 	private async loadPlanningPageAfterGroupSelection(signal?: AbortSignal): Promise<string> {
 		const response = await this.transport.request({
 			path: "/faces/Planning.xhtml",
@@ -1054,8 +1219,10 @@ export class AurionSession {
 	 * @param today Date de référence formatée pour le champ calendrier.
 	 * @param week Numéro de semaine sur deux chiffres.
 	 * @param year Année civile associée à la semaine envoyée.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Un objet contenant le corps brut renvoyé par Aurion pour la requête d'agenda.
 	 * @throws {AurionError} Si l'appel PrimeFaces du planning échoue.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async postPlanning(
 		state: PlanningNavigationState,
@@ -1106,8 +1273,11 @@ export class AurionSession {
 	 *
 	 * @param state État de navigation du planning contenant les identifiants JSF actifs.
 	 * @param eventId Identifiant d'événement sélectionné.
+	 * @param date Date de référence utilisée pour les paramètres du calendrier.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Un objet contenant le corps XML partiel renvoyé par Aurion.
 	 * @throws {AurionError} Si l'appel PrimeFaces échoue.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async postEventDetails(
 		state: PlanningNavigationState,
@@ -1162,8 +1332,10 @@ export class AurionSession {
 	 * Ouvre le sous-menu principal puis cible l'entrée de navigation « Mes absences ».
 	 *
 	 * @param state État de navigation des absences à enrichir.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque l'entrée « Mes absences » est ciblée.
 	 * @throws {AurionError} Si la navigation JSF du menu principal échoue.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async postAbsencesMainMenu(
 		state: AbsencesNavigationState,
@@ -1198,8 +1370,10 @@ export class AurionSession {
 	 * Charge la page MesAbsences et met à jour les champs de contexte JSF actifs.
 	 *
 	 * @param state État de navigation des absences à mettre à jour.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque la page des absences est chargée.
 	 * @throws {AurionError} Si la page MesAbsences ou ses identifiants ne peuvent pas être récupérés.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async loadAbsencesPageState(
 		state: AbsencesNavigationState,
@@ -1225,8 +1399,10 @@ export class AurionSession {
 	 * Exécute la requête de pagination de la table d'absences et parse les lignes HTML.
 	 *
 	 * @param state État de navigation des absences contenant le contexte JSF actif.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Les lignes brutes d'absences extraites de la réponse HTML.
 	 * @throws {AurionError} Si la requête ou le parsing de la table échoue.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async postAbsencesTable(
 		state: AbsencesNavigationState,
@@ -1278,8 +1454,10 @@ export class AurionSession {
 	 * Déclenche la requête PrimeFaces qui renvoie les lignes de notes.
 	 *
 	 * @param state État de navigation des notes contenant l'identifiant de table.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Les lignes brutes de notes renvoyées par Aurion.
 	 * @throws {AurionError} Si la requête ou le parsing des notes échoue.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async postGrade(
 		state: GradesNavigationState,
@@ -1339,8 +1517,10 @@ export class AurionSession {
 	 *
 	 * @param state Structure d'état à peupler avec les identifiants racine.
 	 * @param options Indique notamment s'il faut extraire aussi l'identifiant de formulaire.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque l'état racine est initialisé.
 	 * @throws {AurionError} Si la page racine ou ses identifiants JSF sont indisponibles.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async initializeRootNavigationState(
 		state: { viewState: string; idInit: string; formId?: string; body?: string },
@@ -1370,8 +1550,10 @@ export class AurionSession {
 	 *
 	 * @param state État de navigation contenant `viewState`, `idInit` et `menuId`.
 	 * @param step Nom logique de l'étape de navigation pour le reporting d'erreur.
+	 * @param signal Signal d'annulation facultatif de l'opération appelante.
 	 * @returns Une promesse résolue lorsque la soumission latérale a abouti.
 	 * @throws {AurionError} Si la navigation latérale échoue.
+	 * @throws {AbortError} Si le signal de l'opération est annulé.
 	 */
 	private async postSidebarNavigation(
 		state: { viewState: string; idInit: string; menuId: string },
@@ -1402,6 +1584,14 @@ export class AurionSession {
 		};
 	}
 
+	/**
+	 * Réessaie une navigation une fois après invalidation d'un état JSF périmé.
+	 *
+	 * @param nodeId Nœud de navigation à invalider après un échec récupérable.
+	 * @param action Opération de navigation à exécuter puis éventuellement rejouer.
+	 * @returns La valeur renvoyée par l'opération réussie.
+	 * @throws {AurionError} Si l'échec n'est pas récupérable ou persiste après réessai.
+	 */
 	private async withNavigationRetry<TValue>(
 		nodeId: AurionNavigationNodeId,
 		action: () => Promise<TValue>,
@@ -1420,6 +1610,7 @@ export class AurionSession {
 		}
 	}
 
+	/** Lit l'état de navigation mémorisé pour un nœud, s'il existe. */
 	private readNavigationNode<TState>(id: AurionNavigationNodeId): TState | null {
 		const node = this.navigationNodes.get(id);
 		if (!node) {
@@ -1429,6 +1620,7 @@ export class AurionSession {
 		return node.state as TState;
 	}
 
+	/** Mémorise un état et le lien de dépendance avec son nœud parent. */
 	private writeNavigationNode<TState>(
 		id: AurionNavigationNodeId,
 		parentId: AurionNavigationNodeId | null,
@@ -1442,6 +1634,7 @@ export class AurionSession {
 		});
 	}
 
+	/** Invalide un nœud ainsi que tous ses descendants dépendants. */
 	private invalidateNavigationNode(id: AurionNavigationNodeId): void {
 		this.navigationNodes.delete(id);
 
@@ -1452,6 +1645,7 @@ export class AurionSession {
 		}
 	}
 
+	/** Lit une valeur du cache de session et supprime toute entrée expirée. */
 	private async readCachedValue<TValue>(key: string): Promise<TValue | null> {
 		if (!this.cacheStore) {
 			return null;
@@ -1470,6 +1664,7 @@ export class AurionSession {
 		return entry.value as TValue;
 	}
 
+	/** Écrit une valeur normalisée dans le store configuré, si disponible. */
 	private async writeCachedValue<TValue>(key: string, value: TValue): Promise<void> {
 		if (!this.cacheStore) {
 			return;
@@ -1482,10 +1677,12 @@ export class AurionSession {
 		});
 	}
 
+	/** Construit l'espace de clés isolant l'URL Aurion et le compte courant. */
 	private getSessionCacheScope(): string {
 		return `${this.baseUrl}:${this.username}`;
 	}
 
+	/** Ajoute à chaque événement la méthode permettant de charger ses détails. */
 	private attachEventMethods(
 		events: Array<Omit<AurionPlanningEvent, "getDetails">>,
 		groupContext?: { menuId: string; planningId: string },
@@ -1519,63 +1716,96 @@ export class AurionSession {
 
 /** État intermédiaire propagé entre les étapes de navigation Aurion. */
 interface RootNavigationState {
+	/** Valeur JSF ViewState de la page racine. */
 	viewState: string;
+	/** Identifiant de contexte racine utilisé dans les formulaires. */
 	idInit: string;
+	/** Identifiant du formulaire racine, s'il a été extrait. */
 	formId?: string;
+	/** Réponse HTML initiale, si la navigation en a besoin. */
 	body?: string;
 }
 
 interface MainMenuSnapshot {
+	/** Corps de la réponse du sous-menu ouvert. */
 	body: string;
+	/** Copie du corps servant de contexte au formulaire parent. */
 	formBody: string;
+	/** ViewState actif après l'ouverture du sous-menu. */
 	viewState: string;
+	/** Identifiant racine associé au formulaire du menu. */
 	idInit: string;
 }
 
 interface ChoixPlanningSnapshot {
+	/** Corps HTML de la page de sélection des plannings. */
 	body: string;
+	/** Identifiant racine extrait ou repris du contexte précédent. */
 	idInit: string;
+	/** ViewState requis pour la soumission suivante. */
 	viewState: string;
 }
 
 /** État du menu Notes résolu depuis la racine de session. */
 interface GradesMenuNavigationState {
+	/** ViewState de la page du menu Notes. */
 	viewState: string;
+	/** Identifiant du formulaire racine. */
 	formId: string;
+	/** Identifiant du menu Notes sélectionné. */
 	menuId: string;
+	/** Identifiant de contexte de la page. */
 	idInit: string;
 }
 
 /** État du menu Planning résolu depuis la racine de session. */
 interface PlanningMenuNavigationState {
+	/** ViewState de la page du menu principal. */
 	viewState: string;
+	/** Identifiant du menu Planning. */
 	menuId: string;
+	/** Identifiant de contexte de la page. */
 	idInit: string;
 }
 
 interface GradesNavigationState {
+	/** ViewState courant de la navigation Notes. */
 	viewState: string;
+	/** Identifiant du formulaire racine. */
 	formId: string;
+	/** Identifiant du menu actuellement sélectionné. */
 	menuId: string;
+	/** Identifiant de contexte de la page. */
 	idInit: string;
+	/** Identifiant du formulaire de la table des notes. */
 	formIdGrade: string;
 }
 
 /** État intermédiaire utilisé pendant la navigation de la section planning. */
 interface PlanningNavigationState {
+	/** ViewState courant de la page Planning. */
 	viewState: string;
+	/** Identifiant du menu Planning ouvert. */
 	menuId: string;
+	/** Identifiant de contexte de la page. */
 	idInit: string;
+	/** Identifiant du formulaire calendrier. */
 	formIdPlanning: string;
+	/** Date formatée conservée par le formulaire Aurion. */
 	dateInput?: string | null;
+	/** Semaine formatée conservée par le formulaire Aurion. */
 	weekInput?: string | null;
 }
 
 /** État intermédiaire utilisé pendant la navigation de la section absences. */
 interface AbsencesNavigationState {
+	/** ViewState courant de la page des absences. */
 	viewState: string;
+	/** Identifiant du formulaire racine. */
 	formId: string;
+	/** Identifiant du menu des absences. */
 	menuId: string;
+	/** Identifiant de contexte de la page. */
 	idInit: string;
 }
 
@@ -1589,9 +1819,13 @@ type AurionNavigationNodeId =
 	| "absencesPage";
 
 interface AurionNavigationNode {
+	/** Identifiant stable du nœud de navigation. */
 	id: AurionNavigationNodeId;
+	/** Nœud dont dépend cet état, ou `null` pour la racine. */
 	parentId: AurionNavigationNodeId | null;
+	/** Instant de création de l'instantané, en millisecondes Unix. */
 	createdAt: number;
+	/** Données de navigation associées au nœud. */
 	state: unknown;
 }
 
@@ -1621,6 +1855,12 @@ function assertNavigationSuccess(step: string, status: number, url: string): voi
 	);
 }
 
+/**
+ * Exige la présence de l'identifiant de formulaire dans l'état racine.
+ * @param state État racine dont le formulaire est requis.
+ * @returns L'identifiant de formulaire racine.
+ * @throws {AurionError} Si l'état ne contient pas cet identifiant.
+ */
 function requireRootFormId(state: RootNavigationState): string {
 	if (state.formId) {
 		return state.formId;
@@ -1635,6 +1875,12 @@ function requireRootFormId(state: RootNavigationState): string {
 	);
 }
 
+/**
+ * Exige la présence du corps HTML initial dans l'état racine.
+ * @param state État racine dont le corps HTML est requis.
+ * @returns Le corps HTML de la réponse racine.
+ * @throws {AurionError} Si l'état ne contient pas ce corps.
+ */
 function requireRootBody(state: RootNavigationState): string {
 	if (state.body) {
 		return state.body;
@@ -1645,6 +1891,13 @@ function requireRootBody(state: RootNavigationState): string {
 	});
 }
 
+/**
+ * Tente de trouver l'identifiant d'un sous-menu, sans propager les erreurs de parsing.
+ * @param body Réponse HTML contenant le menu.
+ * @param keyword Texte visible associé au sous-menu.
+ * @returns L'identifiant trouvé, ou `null` si le menu n'est pas présent ou lisible.
+ * @throws {AurionError} Si une erreur autre qu'une erreur de parsing survient.
+ */
 function tryParseSubmenuId(body: string, keyword: string): string | null {
 	try {
 		return parseSubmenuId(body, keyword);
@@ -1657,6 +1910,12 @@ function tryParseSubmenuId(body: string, keyword: string): string | null {
 	}
 }
 
+/**
+ * Extrait le ViewState d'une réponse partielle ou utilise la valeur précédente.
+ * @param body Corps de la réponse HTML ou XML.
+ * @param fallback ViewState à conserver lorsque la réponse n'en fournit pas.
+ * @returns Le ViewState extrait ou la valeur de repli.
+ */
 function parseViewStateOrFallback(body: string, fallback: string): string {
 	const partialResponseViewState = body.match(
 		/<update\b[^>]*id=["'][^"']*javax\.faces\.ViewState(?::\d+)?["'][^>]*>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/update>/i,
@@ -1676,6 +1935,12 @@ function parseViewStateOrFallback(body: string, fallback: string): string {
 	}
 }
 
+/**
+ * Extrait `idInit` de la réponse, ou conserve l'identifiant précédent.
+ * @param body Corps HTML à analyser.
+ * @param fallback Identifiant de repli si l'extraction échoue.
+ * @returns L'identifiant extrait ou la valeur de repli.
+ */
 function parseIdInitOrFallback(body: string, fallback: string): string {
 	try {
 		return parseIdInit(body);
@@ -1688,6 +1953,12 @@ function parseIdInitOrFallback(body: string, fallback: string): string {
 	}
 }
 
+/**
+ * Tente d'extraire l'identifiant du formulaire Planning.
+ * @param body Corps HTML ou XML à analyser.
+ * @returns L'identifiant trouvé, ou `null` si la réponse ne le contient pas.
+ * @throws {AurionError} Si l'extraction échoue pour une raison autre que le parsing.
+ */
 function tryParseFormIdPlanning(body: string): string | null {
 	try {
 		return parseFormIdPlanning(body);
@@ -1700,6 +1971,12 @@ function tryParseFormIdPlanning(body: string): string | null {
 	}
 }
 
+/**
+ * Repère l'identifiant de la table de sélection des plannings.
+ * @param body Corps HTML de ChoixPlanning.
+ * @returns L'identifiant JSF de la table.
+ * @throws {AurionError} Si aucun marqueur de table reconnu n'est trouvé.
+ */
 function parseChoixPlanningTableId(body: string): string {
 	const selectionMatch =
 		body.match(/\bname=["'](form:[^"']+)_selection["']/i) ??
@@ -1722,6 +1999,12 @@ function parseChoixPlanningTableId(body: string): string {
 	);
 }
 
+/**
+ * Repère le bouton de soumission « Voir planning » dans la page de sélection.
+ * @param body Corps HTML de ChoixPlanning.
+ * @returns Le nom ou l'identifiant du bouton de soumission.
+ * @throws {AurionError} Si le bouton ou son identifiant est absent.
+ */
 function parseChoixPlanningSubmitButtonId(body: string): string {
 	for (const button of body.matchAll(/<button\b[\s\S]*?<\/button>/gi)) {
 		const markup = button[0];
@@ -1745,6 +2028,7 @@ function parseChoixPlanningSubmitButtonId(body: string): string {
 	);
 }
 
+/** Indique si un code d'erreur justifie de reconstruire l'état de navigation. */
 function isRecoverableNavigationError(code: string): boolean {
 	return code === "AURION_NAVIGATION_ERROR" || code === "AURION_PARSING_ERROR";
 }
@@ -1785,6 +2069,12 @@ function createFormFocusAndInputFields(
 	};
 }
 
+/**
+ * Extrait la valeur d'un champ HTML identifié par son attribut `name`.
+ * @param body Corps HTML de la page.
+ * @param name Nom du champ à rechercher.
+ * @returns Sa valeur, ou `null` si aucun champ correspondant n'existe.
+ */
 function parseInputValue(body: string, name: string): string | null {
 	const escapedName = name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	const match = body.match(
@@ -1827,12 +2117,14 @@ function resolvePlanningWindow(options?: AurionPlanningOptions): {
 	};
 }
 
+/** Détermine si une valeur d'erreur porte le nom standard `AbortError`. */
 function isAbortError(error: unknown): boolean {
 	return (
 		typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
 	);
 }
 
+/** Interrompt immédiatement l'opération si son signal est déjà annulé. */
 function throwIfAborted(signal?: AbortSignal): void {
 	if (signal?.aborted) {
 		throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
@@ -1852,6 +2144,12 @@ function getWeekNumber(date: Date): number {
 	return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
 }
 
+/**
+ * Élargit une fenêtre afin qu'elle corresponde aux bornes d'approximation du cache.
+ * @param window Fenêtre exacte exprimée en timestamps Unix en millisecondes.
+ * @param approximationMs Taille facultative du compartiment d'approximation.
+ * @returns La fenêtre arrondie, ou la fenêtre originale si l'approximation est désactivée.
+ */
 function approximatePlanningWindow(
 	window: {
 		startTimestamp: number;
@@ -1872,6 +2170,7 @@ function approximatePlanningWindow(
 	};
 }
 
+/** Sérialise les bornes d'une fenêtre pour les intégrer à une clé de cache. */
 function serializePlanningWindow(window: { startTimestamp: number; endTimestamp: number }): string {
 	const start = new Date(window.startTimestamp).toISOString();
 	const end = new Date(window.endTimestamp).toISOString();
@@ -1879,6 +2178,12 @@ function serializePlanningWindow(window: { startTimestamp: number; endTimestamp:
 	return `${start}:${end}`;
 }
 
+/**
+ * Conserve les événements dont la durée chevauche la fenêtre demandée.
+ * @param events Événements à filtrer.
+ * @param window Fenêtre exacte en timestamps Unix en millisecondes.
+ * @returns Les événements qui chevauchent au moins une partie de la fenêtre.
+ */
 function filterPlanningEventsByWindow(
 	events: AurionPlanningEvent[],
 	window: {

@@ -2,6 +2,7 @@ import { type AurionError, createAurionError } from "../errors";
 
 const MENU_ID_KEYWORD = ">Mes notes</span>";
 
+/** Détails structurés attachés à une erreur de parsing Aurion. */
 export interface ParsingErrorDetails {
 	parser: string;
 	reason: string;

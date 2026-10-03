@@ -10,41 +10,63 @@ import type { AurionCacheStore, AurionTransportCacheEntry } from "./cache";
 
 type HttpMethod = "GET" | "POST";
 
-/** Paramètres de construction du transport HTTP Aurion. */
+/** Options nécessaires à la construction du transport HTTP Aurion. */
 interface AurionTransportOptions {
+	/** Identifiant envoyé au formulaire d'authentification Aurion. */
 	username: string;
+	/** Secret transmis uniquement lors de l'authentification distante. */
 	password: string;
+	/** URL de base de l'instance Aurion ciblée. */
 	baseUrl: string;
+	/** Store partagé par les caches de session et de transport, ou `null` pour les désactiver. */
 	cacheStore: AurionCacheStore | null;
+	/** Durée maximale de conservation des réponses HTTP en millisecondes. */
 	cacheMaxAgeMs?: number;
+	/** Fonction Fetch personnalisée, principalement utile aux environnements et tests. */
 	fetchFn?: typeof fetch;
 }
 
 /** Options d'une requête HTTP exécutée par le transport. */
 interface TransportRequestOptions {
+	/** Chemin relatif ou URL absolue de la requête. */
 	path: string;
+	/** Méthode HTTP ; GET est utilisé par défaut. */
 	method?: HttpMethod;
+	/** Corps sérialisé de la requête, si nécessaire. */
 	body?: URLSearchParams | string;
+	/** En-têtes supplémentaires à envoyer. */
 	headers?: HeadersInit;
+	/** Indique si les redirections doivent être suivies manuellement. */
 	followRedirects?: boolean;
+	/** Autorise la lecture ou l'écriture du cache de transport. */
 	cache?: boolean;
+	/** Annule uniquement cette requête HTTP. */
 	signal?: AbortSignal;
 }
 
-/** Résultat interne d'un fetch avec suivi manuel des redirections. */
+/** Résultat interne d'un Fetch avec suivi manuel des redirections. */
 interface RedirectedFetchResult {
+	/** Réponse Fetch finale après suivi éventuel des redirections. */
 	response: Response;
+	/** Statut de la toute première réponse de la chaîne. */
 	initialStatus: number;
+	/** URL finale atteinte après les redirections. */
 	finalUrl: URL;
 }
 
-/** Réponse HTTP normalisée renvoyée au reste du SDK. */
+/** Réponse HTTP normalisée renvoyée aux composants internes du SDK. */
 export interface AurionTransportResponse {
+	/** Statut HTTP final. */
 	status: number;
+	/** Statut HTTP initial, avant toute redirection. */
 	initialStatus: number;
+	/** URL finale de la réponse. */
 	url: string;
+	/** Corps de réponse lu en texte. */
 	body: string;
+	/** En-têtes de la réponse finale. */
 	headers: Headers;
+	/** Vaut `true` lorsque la réponse provient du cache de transport. */
 	fromCache: boolean;
 }
 
@@ -55,6 +77,13 @@ const DEFAULT_HEADERS: HeadersInit = {
 const LOGIN_PATH = "/login";
 const MAX_REDIRECTS = 10;
 
+/**
+ * Attend une promesse ou rejette dès que le signal facultatif est annulé.
+ * @param promise Opération partagée à attendre sans l'annuler elle-même.
+ * @param signal Signal propre à l'appelant qui peut interrompre son attente.
+ * @returns La valeur de l'opération si elle se termine avant l'annulation.
+ * @throws La raison d'annulation du signal, ou l'erreur de la promesse.
+ */
 function waitForAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 	if (!signal) return promise;
 	if (signal.aborted) return Promise.reject(signal.reason);
@@ -110,8 +139,10 @@ export class AurionTransport {
 	/**
 	 * Authentifie la session et garantit une initialisation unique en parallèle.
 	 *
+	 * @param signal Signal qui permet à cet appelant d'arrêter son attente.
 	 * @returns Une promesse résolue lorsque la session distante est prête.
 	 * @throws {AurionError} Si l'authentification ou l'initialisation réseau échoue.
+	 * @throws {AbortError} Si le signal de cet appel est annulé ; la connexion partagée continue.
 	 */
 	async login(signal?: AbortSignal): Promise<void> {
 		if (signal?.aborted) {
@@ -147,6 +178,7 @@ export class AurionTransport {
 	 * @param options Paramètres HTTP de la requête à exécuter.
 	 * @returns La réponse HTTP normalisée, éventuellement issue du cache.
 	 * @throws {AurionError} Si le transport rencontre une erreur réseau ou de redirection.
+	 * @throws {AbortError} Si le signal de la requête est annulé.
 	 */
 	async request(options: TransportRequestOptions): Promise<AurionTransportResponse> {
 		if (options.signal?.aborted) {
@@ -294,8 +326,10 @@ export class AurionTransport {
 	 * @param initialUrl URL de départ de la requête.
 	 * @param requestInit Méthode, en-têtes et corps à utiliser pour la requête initiale.
 	 * @param followRedirects Indique si les redirections HTTP doivent être suivies manuellement.
+	 * @param signal Signal facultatif transmis à chaque requête de la chaîne.
 	 * @returns La réponse finale accompagnée du premier statut et de l'URL atteinte.
 	 * @throws {AurionError} Si une erreur réseau survient ou si le nombre maximal de redirections est dépassé.
+	 * @throws {AbortError} Si le signal interrompt une requête de la chaîne.
 	 */
 	private async fetchWithManualRedirects(
 		initialUrl: URL,
