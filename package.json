@@ -20,9 +20,21 @@
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
-		"types": "./dist/index.d.ts",
-		"import": "./dist/index.js",
-		"require": "./dist/index.cjs"
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		},
+		"./cache": {
+			"types": "./dist/cache.d.ts",
+			"import": "./dist/cache.js",
+			"require": "./dist/cache.cjs"
+		},
+		"./parsers": {
+			"types": "./dist/parsers/index.d.ts",
+			"import": "./dist/parsers/index.js",
+			"require": "./dist/parsers/index.cjs"
+		}
 	},
 	"scripts": {
 		"build": "bun run build.ts",
