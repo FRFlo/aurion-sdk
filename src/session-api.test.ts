@@ -92,4 +92,25 @@ describe("AurionSession public API", () => {
 
 		await expect(request).rejects.toHaveProperty("name", "AbortError");
 	});
+
+	test("includes safe response context when authentication has no session cookie", async () => {
+		const session = new AurionSession({
+			username: "demo",
+			password: "secret",
+			fetchFn: Object.assign(
+				async () => new Response(null, { status: 302, headers: { location: "/home" } }),
+				{ preconnect: fetch.preconnect.bind(fetch) },
+			),
+		});
+
+		await expect(session.getGrades()).rejects.toMatchObject({
+			name: "AurionError",
+			code: "AURION_AUTHENTICATION_ERROR",
+			details: {
+				status: 302,
+				url: "https://aurion.junia.com/login",
+				expected: "session cookie",
+			},
+		});
+	});
 });

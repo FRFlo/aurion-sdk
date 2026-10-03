@@ -314,7 +314,7 @@ interface AurionAbsence {
 
 ### Codes d’erreur
 
-Le SDK expose des erreurs structurées avec les codes normalisés suivants. Une `AurionError` structurée reste un objet (notamment avec `code`, `message` et `details`) ; les consommateurs doivent privilégier cette forme objet plutôt que supposer un format historique différent. Lorsque `details` est une instance native de `Error`, la même erreur d’origine est également disponible via `cause`. `isAurionError` reste la garde recommandée. Les `AbortError` natifs issus d’une annulation et les `RangeError` de validation de fenêtre ne sont pas convertis en `AurionError`.
+Le SDK expose des erreurs structurées avec les codes normalisés suivants. Une `AurionError` structurée reste un objet (notamment avec `code`, `message` et `details`) ; les consommateurs doivent privilégier cette forme objet plutôt que supposer un format historique différent. Le SDK renseigne `details` avec le contexte disponible, par exemple l’étape, le statut HTTP, l’URL ou les informations de parsing, sans inclure les cookies ni les identifiants. Lorsque `details` est une instance native de `Error`, la même erreur d’origine est également disponible via `cause`. `isAurionError` reste la garde recommandée. Les `AbortError` natifs issus d’une annulation et les `RangeError` de validation de fenêtre ne sont pas convertis en `AurionError`.
 
 - `AURION_AUTHENTICATION_ERROR`
 - `AURION_NAVIGATION_ERROR`

@@ -270,6 +270,8 @@ export class AurionTransport {
 		if (loginResponse.initialStatus !== 302) {
 			throw createAurionError("AURION_AUTHENTICATION_ERROR", "Authentification Aurion invalide.", {
 				status: loginResponse.initialStatus,
+				url: loginResponse.url,
+				expected: 302,
 			});
 		}
 
@@ -277,6 +279,11 @@ export class AurionTransport {
 			throw createAurionError(
 				"AURION_AUTHENTICATION_ERROR",
 				"Authentification Aurion invalide: aucun cookie de session reçu.",
+				{
+					status: loginResponse.initialStatus,
+					url: loginResponse.url,
+					expected: "session cookie",
+				},
 			);
 		}
 	}
@@ -362,7 +369,12 @@ export class AurionTransport {
 				throw createAurionError(
 					"AURION_TRANSPORT_ERROR",
 					"Trop de redirections durant la session Aurion.",
-					{ url: currentUrl.toString() },
+					{
+						url: currentUrl.toString(),
+						status: response.status,
+						redirectCount: redirectCount + 1,
+						maxRedirects: MAX_REDIRECTS,
+					},
 				);
 			}
 
@@ -382,6 +394,11 @@ export class AurionTransport {
 		throw createAurionError(
 			"AURION_TRANSPORT_ERROR",
 			"Échec inattendu lors de la gestion des redirections Aurion.",
+			{
+				url: currentUrl.toString(),
+				method: currentMethod,
+				maxRedirects: MAX_REDIRECTS,
+			},
 		);
 	}
 
