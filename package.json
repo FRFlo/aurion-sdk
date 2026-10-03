@@ -27,10 +27,12 @@
 	"scripts": {
 		"build": "bun run build.ts",
 		"prepack": "bun run build",
+		"test": "bun test",
 		"lint": "oxlint",
 		"lint:fix": "oxlint --fix",
 		"fmt": "oxfmt",
-		"fmt:check": "oxfmt --check"
+		"fmt:check": "oxfmt --check",
+		"benchmark:navigation": "bun run bench/navigation-nodes.ts"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.3.11",
