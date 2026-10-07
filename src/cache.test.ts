@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	type AurionCacheOptions,
+	createAurionCacheKey,
 	createAurionValueCacheKey,
 	InMemoryAurionCache,
+	isAurionCacheEntryExpired,
 	resolveAurionCacheConfig,
 	resolveAurionCacheStore,
 } from "./cache";
@@ -127,6 +129,14 @@ describe("cache configuration", () => {
 		});
 
 		expect(cacheConfig.planningTimeRangeApproximationMs).toBe(900_000);
+	});
+
+	test("rejects invalid cache TTLs and expires future-dated entries", () => {
+		expect(() => resolveAurionCacheConfig({ maxAgeMs: Number.NaN })).toThrow(RangeError);
+		expect(() => resolveAurionCacheConfig({ transportMaxAgeMs: -1 })).toThrow(RangeError);
+		expect(
+			isAurionCacheEntryExpired({ kind: "value", createdAt: 101, value: null }, 1_000, 100),
+		).toBe(true);
 	});
 
 	test("AurionSession uses preloaded cached grades before hitting the network", async () => {
@@ -1073,6 +1083,18 @@ describe("cache configuration", () => {
 
 	test("AurionSession navigates grouped planning API and posts captured-shaped payloads", async () => {
 		const postedBodies: string[] = [];
+		let trackingConcurrentDetails = false;
+		let activeGroupedDetailTransitions = 0;
+		let peakGroupedDetailTransitions = 0;
+		let holdNextChooserRequest = false;
+		let markChooserEntered = () => {};
+		let releaseChooser = () => {};
+		const chooserEntered = new Promise<void>((resolve) => {
+			markChooserEntered = resolve;
+		});
+		const chooserGate = new Promise<void>((resolve) => {
+			releaseChooser = resolve;
+		});
 		const rootBody = `
 			>chargerSousMenu = function(){PrimeFaces.ab({s:"form:j_idt52",f:"form"});}
 			<input name="javax.faces.ViewState" value="view-root">
@@ -1158,16 +1180,32 @@ describe("cache configuration", () => {
 			}
 
 			if (url.endsWith("/faces/ChoixPlanning.xhtml") && method === "POST") {
+				if (holdNextChooserRequest) {
+					holdNextChooserRequest = false;
+					markChooserEntered();
+					await chooserGate;
+				}
+				if (trackingConcurrentDetails) {
+					activeGroupedDetailTransitions += 1;
+					peakGroupedDetailTransitions = Math.max(
+						peakGroupedDetailTransitions,
+						activeGroupedDetailTransitions,
+					);
+					await new Promise((resolve) => setTimeout(resolve, 5));
+				}
 				return new Response(planningPageBody, { status: 200 });
 			}
 
 			if (url.endsWith("/faces/Planning.xhtml") && method === "POST") {
 				if (body.includes("javax.faces.partial.event=eventSelect")) {
+					if (trackingConcurrentDetails) {
+						activeGroupedDetailTransitions -= 1;
+					}
 					return new Response(eventDetailsBody, { status: 200 });
 				}
 
 				return new Response(
-					`[{"id":"event-group","title":"Group planning","start":"2026-06-22T08:00:00.000Z","end":"2026-06-22T10:00:00.000Z","allDay":false,"editable":false,"className":"Cours"}]`,
+					`[{"id":"event-group","title":"Group planning","start":"2026-06-22T08:00:00.000Z","end":"2026-06-22T10:00:00.000Z","allDay":false,"editable":false,"className":"Cours"},{"id":"event-group-2","title":"Group planning 2","start":"2026-06-22T10:00:00.000Z","end":"2026-06-22T12:00:00.000Z","allDay":false,"editable":false,"className":"Cours"}]`,
 					{ status: 200 },
 				);
 			}
@@ -1184,7 +1222,12 @@ describe("cache configuration", () => {
 			start: new Date("2026-06-22T00:00:00.000Z"),
 			end: new Date("2026-06-23T00:00:00.000Z"),
 		});
-		const eventDetails = await planning?.[0]?.getDetails();
+		trackingConcurrentDetails = true;
+		const concurrentEventDetails = await Promise.all(
+			(planning ?? []).map((event) => event.getDetails()),
+		);
+		trackingConcurrentDetails = false;
+		const eventDetails = concurrentEventDetails[0];
 		const directEventDetails = await session.getEventDetails("event-group", {
 			date: planning?.[0]?.start,
 		});
@@ -1199,7 +1242,37 @@ describe("cache configuration", () => {
 		expect(planning?.[0]?.id).toBe("event-group");
 		expect(typeof planning?.[0]?.getDetails).toBe("function");
 		expect(eventDetails?.eventId).toBe("event-group");
+		expect(concurrentEventDetails.map((details) => details.eventId)).toEqual([
+			"event-group",
+			"event-group-2",
+		]);
+		expect(peakGroupedDetailTransitions).toBe(1);
 		expect(directEventDetails.eventId).toBe("event-group");
+
+		const firstPlanningEvent = planning?.[0];
+		const secondPlanningEvent = planning?.[1];
+		if (!firstPlanningEvent || !secondPlanningEvent) {
+			throw new Error("Expected two grouped planning events");
+		}
+		await session.clearCache();
+		holdNextChooserRequest = true;
+		const firstQueuedDetails = firstPlanningEvent.getDetails();
+		await chooserEntered;
+		const queuedController = new AbortController();
+		const secondQueuedDetails = secondPlanningEvent
+			.getDetails({ signal: queuedController.signal })
+			.then(
+				() => "resolved",
+				(error: unknown) => error,
+			);
+		queuedController.abort();
+		const queuedAbortResult = await Promise.race([
+			secondQueuedDetails,
+			new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 50)),
+		]);
+		releaseChooser();
+		await firstQueuedDetails;
+		expect(queuedAbortResult).toHaveProperty("name", "AbortError");
 
 		const submenuBody = postedBodies.find((body) =>
 			body.includes("webscolaapp.Sidebar.ID_SUBMENU=submenu_3131476"),
@@ -1291,15 +1364,24 @@ describe("transport cache", () => {
 			fetchFn,
 		});
 
-		await cacheStore.set("transport:GET:https://example.test/resource:", {
-			kind: "transport",
-			createdAt: Date.now() - 10_000,
-			status: 200,
-			initialStatus: 200,
-			url: "https://example.test/resource",
-			body: "stale",
-			headers: [["content-type", "text/plain"]],
-		});
+		await cacheStore.set(
+			createAurionCacheKey(
+				"transport:demo",
+				"GET",
+				"https://example.test/resource",
+				undefined,
+				"follow:",
+			),
+			{
+				kind: "transport",
+				createdAt: Date.now() - 10_000,
+				status: 200,
+				initialStatus: 200,
+				url: "https://example.test/resource",
+				body: "stale",
+				headers: [["content-type", "text/plain"]],
+			},
+		);
 
 		const response = await transport.request({
 			path: "/resource",

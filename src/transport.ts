@@ -22,6 +22,8 @@ interface AurionTransportOptions {
 	cacheStore: AurionCacheStore | null;
 	/** Durée maximale de conservation des réponses HTTP en millisecondes. */
 	cacheMaxAgeMs?: number;
+	/** Délai maximal d'une requête réseau en millisecondes. */
+	requestTimeoutMs?: number;
 	/** Fonction Fetch personnalisée, principalement utile aux environnements et tests. */
 	fetchFn?: typeof fetch;
 }
@@ -42,6 +44,8 @@ interface TransportRequestOptions {
 	cache?: boolean;
 	/** Annule uniquement cette requête HTTP. */
 	signal?: AbortSignal;
+	/** Marque la reprise unique après expiration de session. */
+	_authRetryAttempted?: boolean;
 }
 
 /** Résultat interne d'un Fetch avec suivi manuel des redirections. */
@@ -76,6 +80,7 @@ const DEFAULT_HEADERS: HeadersInit = {
 
 const LOGIN_PATH = "/login";
 const MAX_REDIRECTS = 10;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Attend une promesse ou rejette dès que le signal facultatif est annulé.
@@ -117,10 +122,12 @@ export class AurionTransport {
 	private readonly cookieJar = new InMemoryCookieJar();
 	private readonly cacheStore: AurionCacheStore | null;
 	private readonly cacheMaxAgeMs?: number;
+	private readonly requestTimeoutMs: number;
 	private readonly username: string;
 	readonly #password: string;
 	private loginPromise: Promise<void> | null = null;
 	private authenticated = false;
+	private sessionGeneration = 0;
 
 	/**
 	 * Initialise le transport HTTP Aurion et ses dépendances réseau.
@@ -132,6 +139,10 @@ export class AurionTransport {
 		this.baseUrl = new URL(options.baseUrl);
 		this.cacheStore = options.cacheStore;
 		this.cacheMaxAgeMs = options.cacheMaxAgeMs;
+		this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+		if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
+			throw new RangeError("requestTimeoutMs must be a finite, positive number.");
+		}
 		this.username = options.username;
 		this.#password = options.password;
 	}
@@ -158,6 +169,7 @@ export class AurionTransport {
 			void loginPromise.then(
 				() => {
 					this.authenticated = true;
+					this.sessionGeneration += 1;
 					this.loginPromise = null;
 				},
 				() => {
@@ -184,16 +196,38 @@ export class AurionTransport {
 		if (options.signal?.aborted) {
 			throw options.signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
 		}
+		const requestSessionGeneration = this.sessionGeneration;
 		const method = (options.method ?? "GET").toUpperCase() as HttpMethod;
 		const url = this.resolveUrl(options.path);
 		const requestBody = stringifyBody(options.body);
 		const followRedirects = options.followRedirects ?? true;
+		const headers = new Headers(DEFAULT_HEADERS);
+		if (options.headers) {
+			applyHeaders(headers, options.headers);
+		}
+
+		if (method === "POST" && !headers.has("Content-Type")) {
+			headers.set("Content-Type", "application/x-www-form-urlencoded");
+		}
+
+		const customHeaders = new Headers(options.headers);
+		const headerVariant = Array.from(customHeaders.entries())
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([name, value]) => `${name}:${value}`)
+			.join("&");
+		const cacheVariant = `${followRedirects ? "follow" : "manual"}:${headerVariant}`;
 		const shouldUseCache =
 			(options.cache ?? true) &&
 			this.cacheStore !== null &&
 			(method === "GET" || method === "POST");
 		const cacheKey = shouldUseCache
-			? createAurionCacheKey("transport", method, url.toString(), requestBody)
+			? createAurionCacheKey(
+					`transport:${this.username}`,
+					method,
+					url.toString(),
+					requestBody,
+					cacheVariant,
+				)
 			: null;
 
 		if (cacheKey && this.cacheStore) {
@@ -202,7 +236,11 @@ export class AurionTransport {
 				throw options.signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
 			}
 			if (isAurionTransportCacheEntry(cached)) {
-				if (isAurionCacheEntryExpired(cached, this.cacheMaxAgeMs)) {
+				if (
+					isAurionCacheEntryExpired(cached, this.cacheMaxAgeMs) ||
+					!isSuccessfulStatus(cached.status) ||
+					isLoginPageUrl(cached.url)
+				) {
 					await this.cacheStore.delete(cacheKey);
 				} else {
 					return {
@@ -214,54 +252,93 @@ export class AurionTransport {
 						fromCache: true,
 					};
 				}
+			} else if (cached !== undefined) {
+				await this.cacheStore.delete(cacheKey);
 			}
 		}
 
-		const headers = new Headers(DEFAULT_HEADERS);
-		if (options.headers) {
-			applyHeaders(headers, options.headers);
-		}
-
-		if (method === "POST" && !headers.has("Content-Type")) {
-			headers.set("Content-Type", "application/x-www-form-urlencoded");
-		}
-
-		const { response, initialStatus, finalUrl } = await this.fetchWithManualRedirects(
-			url,
-			{
-				method,
-				headers,
-				body: requestBody,
-			},
-			followRedirects,
-			options.signal,
+		const timeoutController = new AbortController();
+		const timeoutId = setTimeout(
+			() => timeoutController.abort(new DOMException("Aurion request timed out.", "TimeoutError")),
+			this.requestTimeoutMs,
 		);
+		const signal = options.signal
+			? AbortSignal.any([options.signal, timeoutController.signal])
+			: timeoutController.signal;
 
-		const body = await response.text();
-		const transportResponse: AurionTransportResponse = {
-			status: response.status,
-			initialStatus,
-			url: finalUrl.toString(),
-			body,
-			headers: response.headers,
-			fromCache: false,
-		};
+		try {
+			const { response, initialStatus, finalUrl } = await waitForAbort(
+				this.fetchWithManualRedirects(
+					url,
+					{ method, headers, body: requestBody },
+					followRedirects,
+					signal,
+				),
+				signal,
+			);
+			const body = await waitForAbort(response.text(), signal);
 
-		if (cacheKey) {
-			const cacheEntry: AurionTransportCacheEntry = {
-				kind: "transport",
-				createdAt: Date.now(),
-				status: transportResponse.status,
-				initialStatus: transportResponse.initialStatus,
-				url: transportResponse.url,
-				body: transportResponse.body,
-				headers: Array.from(transportResponse.headers.entries()),
+			if (
+				!options._authRetryAttempted &&
+				url.pathname.toLowerCase() !== LOGIN_PATH &&
+				isLoginPageUrl(finalUrl.toString())
+			) {
+				if (this.authenticated && this.sessionGeneration === requestSessionGeneration) {
+					this.authenticated = false;
+					this.loginPromise = null;
+					this.cookieJar.clear();
+					this.sessionGeneration += 1;
+				}
+				await this.login(options.signal);
+				return await this.request({ ...options, _authRetryAttempted: true });
+			}
+
+			const transportResponse: AurionTransportResponse = {
+				status: response.status,
+				initialStatus,
+				url: finalUrl.toString(),
+				body,
+				headers: response.headers,
+				fromCache: false,
 			};
 
-			await this.cacheStore?.set(cacheKey, cacheEntry);
-		}
+			if (
+				cacheKey &&
+				isSuccessfulStatus(transportResponse.status) &&
+				!isLoginPageUrl(transportResponse.url)
+			) {
+				const cacheEntry: AurionTransportCacheEntry = {
+					kind: "transport",
+					createdAt: Date.now(),
+					status: transportResponse.status,
+					initialStatus: transportResponse.initialStatus,
+					url: transportResponse.url,
+					body: transportResponse.body,
+					headers: Array.from(transportResponse.headers.entries()),
+				};
 
-		return transportResponse;
+				await this.cacheStore?.set(cacheKey, cacheEntry);
+			}
+
+			return transportResponse;
+		} catch (error: unknown) {
+			if (options.signal?.aborted) throw options.signal.reason ?? error;
+			if (timeoutController.signal.aborted) {
+				throw createAurionError(
+					"AURION_TRANSPORT_ERROR",
+					`La requête Aurion a dépassé le délai maximal de ${this.requestTimeoutMs} ms.`,
+					{ timeoutMs: this.requestTimeoutMs, cause: error },
+				);
+			}
+			if (isAurionError(error)) throw error;
+			throw createAurionError(
+				"AURION_TRANSPORT_ERROR",
+				"La réponse réseau Aurion est illisible.",
+				error,
+			);
+		} finally {
+			clearTimeout(timeoutId);
+		}
 	}
 
 	/**
@@ -412,7 +489,13 @@ export class AurionTransport {
 				);
 			}
 
-			currentUrl = new URL(location, currentUrl);
+			const nextUrl = new URL(location, currentUrl);
+			if (nextUrl.origin !== currentUrl.origin) {
+				currentHeaders.delete("authorization");
+				currentHeaders.delete("proxy-authorization");
+				currentHeaders.delete("cookie");
+			}
+			currentUrl = nextUrl;
 			const rewritten = rewriteRedirectRequest(
 				currentMethod,
 				currentHeaders,
@@ -511,7 +594,19 @@ function stringifyBody(body: URLSearchParams | string | undefined): string | und
  * @returns `true` si le statut correspond à une redirection HTTP.
  */
 function isRedirectStatus(status: number): boolean {
-	return status >= 300 && status < 400;
+	return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+function isSuccessfulStatus(status: number): boolean {
+	return status >= 200 && status < 300;
+}
+
+function isLoginPageUrl(url: string): boolean {
+	try {
+		return /(?:^|\/)login(?:\.xhtml)?\/?$/i.test(new URL(url).pathname);
+	} catch {
+		return false;
+	}
 }
 
 /**

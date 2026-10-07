@@ -85,6 +85,11 @@ export class InMemoryCookieJar {
 	hasCookies(): boolean {
 		return this.cookies.size > 0;
 	}
+
+	/** Supprime les cookies locaux après détection d'une session distante expirée. */
+	clear(): void {
+		this.cookies.clear();
+	}
 }
 
 /**

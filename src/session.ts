@@ -81,6 +81,8 @@ export class AurionSession {
 		string,
 		{ menuId: string; planningId: string }
 	>();
+	/** Sérialise les transitions JSF du planning de promotion dans cette session. */
+	private groupedPlanningQueue: Promise<void> = Promise.resolve();
 
 	/**
 	 * Initialise une session cliente à partir des options fournies.
@@ -112,6 +114,7 @@ export class AurionSession {
 			cacheMaxAgeMs: cacheConfig.transportMaxAgeMs,
 			baseUrl: this.baseUrl,
 			fetchFn: options.fetchFn,
+			requestTimeoutMs: options.requestTimeoutMs,
 		});
 	}
 
@@ -134,19 +137,25 @@ export class AurionSession {
 		try {
 			throwIfAborted(options?.signal);
 			const cached = await this.readCachedValue<AurionGrade[]>(cacheKey);
+			throwIfAborted(options?.signal);
 			if (cached) {
 				return cached;
 			}
 
 			await this.transport.login(options?.signal);
 
-			const rawGrades = await this.withNavigationRetry("gradesPage", async () => {
-				const state = await this.resolveGradesPageNode(options?.signal);
+			const rawGrades = await this.withNavigationRetry(
+				"gradesPage",
+				async () => {
+					const state = await this.resolveGradesPageNode(options?.signal);
 
-				return this.postGrade(state, options?.signal);
-			});
+					return this.postGrade(state, options?.signal);
+				},
+				options?.signal,
+			);
 
 			const grades = rawGrades.map((rawGrade) => toAurionGrade(rawGrade));
+			throwIfAborted(options?.signal);
 			await this.writeCachedValue(cacheKey, grades);
 
 			return grades;
@@ -193,6 +202,7 @@ export class AurionSession {
 			throwIfAborted(options?.signal);
 			const cached =
 				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
+			throwIfAborted(options?.signal);
 			if (cached) {
 				return filterPlanningEventsByWindow(this.attachEventMethods(cached), exactWindow);
 			}
@@ -208,21 +218,26 @@ export class AurionSession {
 			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
 			const year = String(planningDate.getFullYear());
 
-			const response = await this.withNavigationRetry("planningPage", async () => {
-				const state = await this.resolvePlanningPageNode(options?.signal);
+			const response = await this.withNavigationRetry(
+				"planningPage",
+				async () => {
+					const state = await this.resolvePlanningPageNode(options?.signal);
 
-				return this.postPlanning(
-					state,
-					cacheWindow.startTimestamp,
-					cacheWindow.endTimestamp,
-					today,
-					week,
-					year,
-					options?.signal,
-				);
-			});
+					return this.postPlanning(
+						state,
+						cacheWindow.startTimestamp,
+						cacheWindow.endTimestamp,
+						today,
+						week,
+						year,
+						options?.signal,
+					);
+				},
+				options?.signal,
+			);
 
 			const planning = parsePlanningEvents(response.body);
+			throwIfAborted(options?.signal);
 			await this.writeCachedValue(cacheKey, planning);
 
 			return filterPlanningEventsByWindow(this.attachEventMethods(planning), exactWindow);
@@ -321,8 +336,10 @@ export class AurionSession {
 	): Promise<AurionAvailablePlanning[]> {
 		throwIfAborted(options?.signal);
 		const groups = await this.getPlanningsGroups(options);
+		throwIfAborted(options?.signal);
 		const availablePlannings: AurionAvailablePlanning[] = [];
 		const subgroupBranches = await Promise.all(groups.map((group) => group.getSubgroups(options)));
+		throwIfAborted(options?.signal);
 
 		// Independent tree branches carry their own ViewState snapshots. The tree's
 		// parent-child dependencies, not an arbitrary worker cap, govern traversal.
@@ -332,6 +349,7 @@ export class AurionSession {
 			availablePlannings.push(...(await subgroup.getPlannings(options)));
 		}
 
+		throwIfAborted(options?.signal);
 		return availablePlannings;
 	}
 
@@ -497,6 +515,7 @@ export class AurionSession {
 			throwIfAborted(options?.signal);
 			const cached =
 				await this.readCachedValue<Array<Omit<AurionPlanningEvent, "getDetails">>>(cacheKey);
+			throwIfAborted(options?.signal);
 			if (cached) {
 				return filterPlanningEventsByWindow(
 					this.attachEventMethods(cached, { menuId, planningId }),
@@ -515,22 +534,25 @@ export class AurionSession {
 			const week = String(getWeekNumber(planningDate)).padStart(2, "0");
 			const year = String(planningDate.getFullYear());
 
-			const planningState = await this.loadPlanningForGroupState(
-				menuId,
-				planningId,
-				options?.signal,
-			);
-			const response = await this.postPlanning(
-				planningState,
-				cacheWindow.startTimestamp,
-				cacheWindow.endTimestamp,
-				today,
-				week,
-				year,
-				options?.signal,
-			);
+			const response = await this.withGroupedPlanningQueue(async () => {
+				const planningState = await this.loadPlanningForGroupState(
+					menuId,
+					planningId,
+					options?.signal,
+				);
+				return this.postPlanning(
+					planningState,
+					cacheWindow.startTimestamp,
+					cacheWindow.endTimestamp,
+					today,
+					week,
+					year,
+					options?.signal,
+				);
+			}, options?.signal);
 
 			const planning = parsePlanningEvents(response.body);
+			throwIfAborted(options?.signal);
 			await this.writeCachedValue(cacheKey, planning);
 
 			return filterPlanningEventsByWindow(
@@ -596,21 +618,31 @@ export class AurionSession {
 		try {
 			throwIfAborted(options?.signal);
 			const cached = await this.readCachedValue<AurionPlanningEventDetails>(cacheKey);
+			throwIfAborted(options?.signal);
 			if (cached) {
 				return cached;
 			}
 
 			await this.transport.login(options?.signal);
 
-			const response = await this.withNavigationRetry("planningPage", async () => {
-				const state = resolvePlanningState
-					? await resolvePlanningState()
-					: await this.resolvePlanningPageNode(options?.signal);
+			const requestDetails = () =>
+				this.withNavigationRetry(
+					"planningPage",
+					async () => {
+						const state = resolvePlanningState
+							? await resolvePlanningState()
+							: await this.resolvePlanningPageNode(options?.signal);
 
-				return this.postEventDetails(state, eventId, options?.date, options?.signal);
-			});
+						return this.postEventDetails(state, eventId, options?.date, options?.signal);
+					},
+					options?.signal,
+				);
+			const response = await (resolvePlanningState
+				? this.withGroupedPlanningQueue(requestDetails, options?.signal)
+				: requestDetails());
 
 			const details = parseEventDetails(response.body, eventId);
+			throwIfAborted(options?.signal);
 			await this.writeCachedValue(cacheKey, details);
 
 			return details;
@@ -650,19 +682,25 @@ export class AurionSession {
 		try {
 			throwIfAborted(options?.signal);
 			const cached = await this.readCachedValue<AurionAbsence[]>(cacheKey);
+			throwIfAborted(options?.signal);
 			if (cached) {
 				return cached;
 			}
 
 			await this.transport.login(options?.signal);
 
-			const rawAbsences = await this.withNavigationRetry("absencesPage", async () => {
-				const state = await this.resolveAbsencesPageNode(options?.signal);
+			const rawAbsences = await this.withNavigationRetry(
+				"absencesPage",
+				async () => {
+					const state = await this.resolveAbsencesPageNode(options?.signal);
 
-				return this.postAbsencesTable(state, options?.signal);
-			});
+					return this.postAbsencesTable(state, options?.signal);
+				},
+				options?.signal,
+			);
 
 			const absences = rawAbsences.map((rawAbsence) => toAurionAbsence(rawAbsence));
+			throwIfAborted(options?.signal);
 			await this.writeCachedValue(cacheKey, absences);
 
 			return absences;
@@ -1595,6 +1633,7 @@ export class AurionSession {
 	private async withNavigationRetry<TValue>(
 		nodeId: AurionNavigationNodeId,
 		action: () => Promise<TValue>,
+		signal?: AbortSignal,
 	): Promise<TValue> {
 		try {
 			return await action();
@@ -1602,11 +1641,37 @@ export class AurionSession {
 			if (!isAurionError(error) || !isRecoverableNavigationError(error.code)) {
 				throw error;
 			}
+			throwIfAborted(signal);
 
 			this.invalidateNavigationNode(nodeId);
 			this.invalidateNavigationNode("root");
 
 			return action();
+		}
+	}
+
+	/** Exécute une transition de planning groupé sans chevauchement avec la suivante. */
+	private async withGroupedPlanningQueue<TValue>(
+		action: () => Promise<TValue>,
+		signal?: AbortSignal,
+	): Promise<TValue> {
+		const previous = this.groupedPlanningQueue;
+		let release!: () => void;
+		this.groupedPlanningQueue = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		try {
+			await waitForAbort(previous, signal);
+		} catch (error: unknown) {
+			void previous.then(release, release);
+			throw error;
+		}
+		try {
+			throwIfAborted(signal);
+			return await action();
+		} finally {
+			release();
 		}
 	}
 
@@ -2076,12 +2141,14 @@ function createFormFocusAndInputFields(
  * @returns Sa valeur, ou `null` si aucun champ correspondant n'existe.
  */
 function parseInputValue(body: string, name: string): string | null {
-	const escapedName = name.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const match = body.match(
-		new RegExp(`<input[^>]*name=["']${escapedName}["'][^>]*value=["']([^"']*)["']`, "i"),
-	);
+	for (const input of body.matchAll(/<input\b[^>]*>/gi)) {
+		const tag = input[0];
+		const inputName = tag.match(/\sname\s*=\s*(["'])(.*?)\1/i)?.[2];
+		if (inputName !== name) continue;
+		return tag.match(/\svalue\s*=\s*(["'])(.*?)\1/i)?.[2] ?? null;
+	}
 
-	return match?.[1] ?? null;
+	return null;
 }
 
 /**
@@ -2129,6 +2196,29 @@ function throwIfAborted(signal?: AbortSignal): void {
 	if (signal?.aborted) {
 		throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
 	}
+}
+
+function waitForAbort<TValue>(promise: Promise<TValue>, signal?: AbortSignal): Promise<TValue> {
+	if (!signal) return promise;
+	if (signal.aborted) return Promise.reject(signal.reason);
+
+	return new Promise<TValue>((resolve, reject) => {
+		const onAbort = () => {
+			signal.removeEventListener("abort", onAbort);
+			reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
 }
 
 /**

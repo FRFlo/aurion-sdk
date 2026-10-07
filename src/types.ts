@@ -31,6 +31,8 @@ export interface AurionSessionOptions {
 	 * adaptée à un runtime spécifique.
 	 */
 	fetchFn?: typeof fetch;
+	/** Délai maximal de chaque requête HTTP, redirections incluses, en millisecondes. @default 30000 */
+	requestTimeoutMs?: number;
 	/**
 	 * Configure le cache utilisé par la session et par la couche HTTP.
 	 *

@@ -144,8 +144,19 @@ function resolveTimeRangeApproximationMs(
 	if (!Number.isInteger(step) || step < 1) {
 		throw new RangeError("Aurion cache time range approximation step must be a positive integer.");
 	}
+	const unitMs = TIME_RANGE_APPROXIMATION_UNIT_TO_MS[approximation.unit];
+	if (!unitMs) {
+		throw new RangeError("Aurion cache time range approximation unit is invalid.");
+	}
 
-	return TIME_RANGE_APPROXIMATION_UNIT_TO_MS[approximation.unit] * step;
+	return unitMs * step;
+}
+
+function validateCacheTtl(name: string, value: number | undefined): number | undefined {
+	if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+		throw new RangeError(`${name} must be a finite, non-negative number.`);
+	}
+	return value;
 }
 
 /**
@@ -237,8 +248,11 @@ export function resolveAurionCacheConfig(
 
 	return {
 		store: cache.store ?? new InMemoryAurionCache(),
-		transportMaxAgeMs: cache.transportMaxAgeMs ?? cache.maxAgeMs,
-		sessionMaxAgeMs: cache.sessionMaxAgeMs ?? cache.maxAgeMs,
+		transportMaxAgeMs: validateCacheTtl(
+			"transportMaxAgeMs",
+			cache.transportMaxAgeMs ?? cache.maxAgeMs,
+		),
+		sessionMaxAgeMs: validateCacheTtl("sessionMaxAgeMs", cache.sessionMaxAgeMs ?? cache.maxAgeMs),
 		planningTimeRangeApproximationMs: resolveTimeRangeApproximationMs(
 			cache.timeRangeApproximation?.planning,
 		),
@@ -270,8 +284,10 @@ export function createAurionCacheKey(
 	method: string,
 	url: string,
 	body?: string,
+	variant = "",
 ): string {
-	return `${scope}:${method}:${url}:${body ?? ""}`;
+	const baseKey = `${scope}:${method}:${url}:${body ?? ""}`;
+	return variant ? `${baseKey}:${variant}` : baseKey;
 }
 
 /**
@@ -289,10 +305,46 @@ export function createAurionValueCacheKey(scope: string, key: string): string {
  * @param entry Entrée éventuelle à examiner.
  * @returns `true` uniquement pour une entrée de type `transport`.
  */
-export function isAurionTransportCacheEntry(
-	entry: AurionCacheEntry | undefined,
-): entry is AurionTransportCacheEntry {
-	return entry?.kind === "transport";
+export function isAurionTransportCacheEntry(entry: unknown): entry is AurionTransportCacheEntry {
+	if (typeof entry !== "object" || entry === null) return false;
+	const candidate = entry as Partial<AurionTransportCacheEntry>;
+	if (
+		candidate.kind !== "transport" ||
+		!Number.isInteger(candidate.status) ||
+		!Number.isInteger(candidate.initialStatus) ||
+		(candidate.status ?? 0) < 100 ||
+		(candidate.status ?? 0) > 599 ||
+		(candidate.initialStatus ?? 0) < 100 ||
+		(candidate.initialStatus ?? 0) > 599 ||
+		typeof candidate.url !== "string" ||
+		typeof candidate.body !== "string" ||
+		!Array.isArray(candidate.headers) ||
+		(candidate.createdAt !== undefined && !Number.isFinite(candidate.createdAt))
+	) {
+		return false;
+	}
+
+	try {
+		const url = new URL(candidate.url);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+	} catch {
+		return false;
+	}
+
+	const headersAreValid = candidate.headers.every(
+		(header) =>
+			Array.isArray(header) &&
+			header.length === 2 &&
+			typeof header[0] === "string" &&
+			typeof header[1] === "string",
+	);
+	if (!headersAreValid) return false;
+	try {
+		new Headers(candidate.headers);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -300,10 +352,14 @@ export function isAurionTransportCacheEntry(
  * @param entry Entrée éventuelle à examiner.
  * @returns `true` uniquement pour une entrée de type `value`.
  */
-export function isAurionValueCacheEntry(
-	entry: AurionCacheEntry | undefined,
-): entry is AurionValueCacheEntry {
-	return entry?.kind === "value";
+export function isAurionValueCacheEntry(entry: unknown): entry is AurionValueCacheEntry {
+	if (typeof entry !== "object" || entry === null) return false;
+	const candidate = entry as Partial<AurionValueCacheEntry>;
+	return (
+		candidate.kind === "value" &&
+		"value" in candidate &&
+		(candidate.createdAt === undefined || Number.isFinite(candidate.createdAt))
+	);
 }
 
 /**
@@ -321,8 +377,12 @@ export function isAurionCacheEntryExpired(
 	maxAgeMs: number | undefined,
 	now = Date.now(),
 ): boolean {
+	validateCacheTtl("maxAgeMs", maxAgeMs);
 	if (maxAgeMs === undefined || entry.createdAt === undefined) {
 		return false;
+	}
+	if (!Number.isFinite(entry.createdAt) || entry.createdAt > now) {
+		return true;
 	}
 
 	return now - entry.createdAt > maxAgeMs;

@@ -109,7 +109,17 @@ const planning = await session.getPlanning({
 for (const event of planning) {
 	console.log(event.title, event.start, event.end, event.type);
 }
+
+// Comme dans l'interface Aurion, sélectionnez un événement pour charger
+// ses informations complètes (matière, intervenants, salles, groupes, etc.).
+const details = await planning[0]?.getDetails();
+console.log(details?.subject, details?.teachers, details?.resources);
 ```
+
+`getDetails()` reproduit la sélection de l'événement dans le calendrier Aurion
+et renvoie un `AurionPlanningEventDetails`. La méthode accepte aussi
+`{ signal?: AbortSignal }` et fonctionne pour les événements des plannings
+personnels comme pour ceux chargés depuis les plannings de promotion.
 
 ### Comment parcourir les plannings des promotions
 
@@ -236,13 +246,14 @@ new AurionSession(options: AurionSessionOptions)
 
 Champs de `AurionSessionOptions` :
 
-| Champ      | Type                                                | Description                                                                                 |
-| ---------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `username` | `string`                                            | Identifiant de connexion Aurion                                                             |
-| `password` | `string`                                            | Mot de passe Aurion ; conservé comme donnée privée de la session et non exposé publiquement |
-| `fetchFn`  | `typeof fetch`                                      | Implémentation personnalisée optionnelle de `fetch`                                         |
-| `cache`    | `boolean \| AurionCacheStore \| AurionCacheOptions` | Configuration du cache                                                                      |
-| `baseUrl`  | `string`                                            | URL optionnelle de l’instance Aurion, par défaut `https://aurion.junia.com`                 |
+| Champ              | Type                                                | Description                                                                                 |
+| ------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `username`         | `string`                                            | Identifiant de connexion Aurion                                                             |
+| `password`         | `string`                                            | Mot de passe Aurion ; conservé comme donnée privée de la session et non exposé publiquement |
+| `fetchFn`          | `typeof fetch`                                      | Implémentation personnalisée optionnelle de `fetch`                                         |
+| `requestTimeoutMs` | `number`                                            | Délai maximal par requête HTTP, redirections incluses ; 30 000 ms par défaut                |
+| `cache`            | `boolean \| AurionCacheStore \| AurionCacheOptions` | Configuration du cache                                                                      |
+| `baseUrl`          | `string`                                            | URL optionnelle de l’instance Aurion, par défaut `https://aurion.junia.com`                 |
 
 `getGrades({ signal })` et `getPlanning({ start, end, signal })` acceptent un `AbortSignal` par appel. Appelez `controller.abort()` pour annuler l’opération concernée. L’annulation s’applique aux requêtes HTTP internes à cette opération et rejette avec l’`AbortError` natif (non converti en `AurionError`). L’authentification partagée peut toutefois continuer lorsqu’elle est également utilisée par des appels concurrents.
 
@@ -252,6 +263,9 @@ Les opérations ci-dessous reçoivent leur signal dans les options de l’appel 
 `listAvailablePlannings({ signal })` et `getAbsences({ signal })`.
 Les méthodes de navigation des groupes et sous-groupes ainsi que
 `AurionPlanningEvent.getDetails({ signal })` acceptent aussi un signal par appel.
+Chaque requête HTTP est également limitée à 30 secondes par défaut ; configurez
+`requestTimeoutMs` pour modifier ce délai. Un timeout produit une `AurionError`
+de code `AURION_TRANSPORT_ERROR`, distincte d’une annulation explicite.
 
 Méthodes principales :
 
@@ -296,6 +310,23 @@ interface AurionPlanningEvent {
 	allDay: boolean;
 	editable: boolean;
 	type: string;
+	getDetails(options?: { signal?: AbortSignal }): Promise<AurionPlanningEventDetails>;
+}
+
+interface AurionPlanningEventDetails {
+	eventId: string;
+	start: Date;
+	end: Date;
+	status: string | null;
+	subject: string | null;
+	teachingType: string | null;
+	description: string | null;
+	isExam: boolean;
+	teachers: Array<{ lastName: string; firstName: string }>;
+	students: Array<{ lastName: string; firstName: string }>;
+	groups: Array<{ code: string; name: string }>;
+	courses: Array<{ code: string; course: string; module: string }>;
+	resources: Array<{ code: string; name: string }>;
 }
 ```
 
