@@ -488,15 +488,20 @@ function parseFrenchDateText(body: string, value: string, field: string): Date {
 		});
 	}
 
-	const date = new Date(
-		Number.parseInt(match[3], 10),
-		month,
-		Number.parseInt(match[1], 10),
-		Number.parseInt(match[4], 10),
-		Number.parseInt(match[5], 10),
-	);
+	const year = Number.parseInt(match[3], 10);
+	const day = Number.parseInt(match[1], 10);
+	const hour = Number.parseInt(match[4], 10);
+	const minute = Number.parseInt(match[5], 10);
+	const date = new Date(year, month, day, hour, minute);
 
-	if (Number.isNaN(date.getTime())) {
+	if (
+		Number.isNaN(date.getTime()) ||
+		date.getFullYear() !== year ||
+		date.getMonth() !== month ||
+		date.getDate() !== day ||
+		date.getHours() !== hour ||
+		date.getMinutes() !== minute
+	) {
 		throwParsingError(body, "parseEventDetails", `Invalid ${field} date`, {
 			value,
 		});

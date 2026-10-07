@@ -1,6 +1,71 @@
 import { type AurionError, createAurionError } from "../errors";
 
 const MENU_ID_KEYWORD = ">Mes notes</span>";
+const COMMON_HTML_ENTITIES: Record<string, string> = {
+	Agrave: "À",
+	Aacute: "Á",
+	Acirc: "Â",
+	Auml: "Ä",
+	Ccedil: "Ç",
+	Egrave: "È",
+	Eacute: "É",
+	Ecirc: "Ê",
+	Euml: "Ë",
+	Igrave: "Ì",
+	Iacute: "Í",
+	Icirc: "Î",
+	Iuml: "Ï",
+	Ntilde: "Ñ",
+	Ograve: "Ò",
+	Oacute: "Ó",
+	Ocirc: "Ô",
+	Ouml: "Ö",
+	Ugrave: "Ù",
+	Uacute: "Ú",
+	Ucirc: "Û",
+	Uuml: "Ü",
+	Yacute: "Ý",
+	agrave: "à",
+	aacute: "á",
+	acirc: "â",
+	auml: "ä",
+	ccedil: "ç",
+	egrave: "è",
+	eacute: "é",
+	ecirc: "ê",
+	euml: "ë",
+	igrave: "ì",
+	iacute: "í",
+	icirc: "î",
+	iuml: "ï",
+	ntilde: "ñ",
+	ograve: "ò",
+	oacute: "ó",
+	ocirc: "ô",
+	ouml: "ö",
+	ugrave: "ù",
+	uacute: "ú",
+	ucirc: "û",
+	uuml: "ü",
+	yacute: "ý",
+	yuml: "ÿ",
+	nbsp: " ",
+	amp: "&",
+	lt: "<",
+	gt: ">",
+	quot: '"',
+	apos: "'",
+	copy: "©",
+	reg: "®",
+	euro: "€",
+	ndash: "–",
+	mdash: "—",
+	hellip: "…",
+	rsquo: "’",
+	lsquo: "‘",
+	rdquo: "”",
+	ldquo: "“",
+};
 
 /** Détails structurés attachés à une erreur de parsing Aurion. */
 export interface ParsingErrorDetails {
@@ -18,12 +83,12 @@ export interface ParsingErrorDetails {
  * @throws {AurionError} Si le champ `ViewState` est introuvable.
  */
 export function parseViewState(body: string): string {
-	const match = body.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
-	if (!match?.[1]) {
+	const value = findInputValue(body, "javax.faces.ViewState");
+	if (!value) {
 		throwParsingError(body, "parseViewState", "Missing javax.faces.ViewState input");
 	}
 
-	return match[1];
+	return value;
 }
 
 /**
@@ -34,12 +99,25 @@ export function parseViewState(body: string): string {
  * @throws {AurionError} Si le champ `form:idInit` est absent.
  */
 export function parseIdInit(body: string): string {
-	const match = body.match(/<input[^>]*name="form:idInit"[^>]*value="([^"]+)"/);
-	if (!match?.[1]) {
+	const value = findInputValue(body, "form:idInit");
+	if (!value) {
 		throwParsingError(body, "parseIdInit", "Missing form:idInit hidden input");
 	}
 
-	return match[1];
+	return value;
+}
+
+function findInputValue(body: string, name: string): string | null {
+	for (const input of body.matchAll(/<input\b[^>]*>/gi)) {
+		const tag = input[0];
+		const inputName = tag.match(/\sname\s*=\s*(["'])(.*?)\1/i)?.[2];
+		if (inputName !== name) continue;
+
+		const value = tag.match(/\svalue\s*=\s*(["'])(.*?)\1/i)?.[2];
+		return value ?? null;
+	}
+
+	return null;
 }
 
 /**
@@ -101,13 +179,27 @@ export function normalizeText(input: string): string {
  * @returns La chaîne avec les entités usuelles remplacées par leurs caractères réels.
  */
 export function decodeHtmlEntities(input: string): string {
-	return input
-		.replaceAll("&nbsp;", " ")
-		.replaceAll("&amp;", "&")
-		.replaceAll("&lt;", "<")
-		.replaceAll("&gt;", ">")
-		.replaceAll("&quot;", '"')
-		.replaceAll("&#39;", "'");
+	return input.replace(/&(#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/gi, (entity, token: string) => {
+		if (token.startsWith("#")) {
+			const isHex = token[1]?.toLowerCase() === "x";
+			const codePoint = Number.parseInt(token.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+			if (
+				!Number.isInteger(codePoint) ||
+				codePoint === 0 ||
+				codePoint > 0x10ffff ||
+				(codePoint >= 0xd800 && codePoint <= 0xdfff)
+			) {
+				return "\uFFFD";
+			}
+			try {
+				return String.fromCodePoint(codePoint);
+			} catch {
+				return "\uFFFD";
+			}
+		}
+
+		return Object.hasOwn(COMMON_HTML_ENTITIES, token) ? COMMON_HTML_ENTITIES[token]! : entity;
+	});
 }
 
 /**

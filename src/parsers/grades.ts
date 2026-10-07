@@ -140,7 +140,9 @@ export function parseGrades(body: string): RawAurionGradeRow[] {
 
 	for (const row of rows) {
 		const cells = row.match(/<td[^>]*>([\s\S]*?)<\/td>/g) ?? [];
-		if (cells.length === 0) {
+		// The current Aurion grade datatable has 11 columns. Partial responses may
+		// also contain unrelated layout rows; never map those into grade fields.
+		if (cells.length < 11) {
 			continue;
 		}
 

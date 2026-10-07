@@ -85,4 +85,13 @@ describe("parseEventDetails", () => {
 			},
 		]);
 	});
+
+	test("rejects impossible dates instead of silently normalizing them", async () => {
+		const body = (await Bun.file("response-getEventDetails.xml").text()).replaceAll(
+			"15 juin 2026",
+			"31 février 2026",
+		);
+
+		expect(() => parseEventDetails(body, "event-invalid-date")).toThrow();
+	});
 });
